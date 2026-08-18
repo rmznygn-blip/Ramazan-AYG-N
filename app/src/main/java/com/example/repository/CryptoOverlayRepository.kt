@@ -24,83 +24,84 @@ import java.net.URL
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
-import kotlin.random.Random
 
 object CryptoOverlayRepository {
 
     private val repositoryScope = CoroutineScope(Dispatchers.Default)
-    private var simulationJob: Job? = null
     private var livePriceJob: Job? = null
 
-    private val defaultAssets = listOf(
+    // Tracked Major Crypto Pairs on Midas & Binance
+    val MONITORED_SYMBOLS = listOf("SOL", "BTC", "ETH", "AVAX", "XRP", "DOGE", "PEPE", "SUI")
+
+    private val initialAssets = listOf(
         CryptoAsset(
             id = "SOL",
             symbol = "SOL",
             name = "Solana",
-            priceFormatted = "$78.40",
-            rawPrice = 78.40,
+            priceFormatted = "$0.00",
+            rawPrice = 0.0,
             currencySymbol = "$",
-            changePercent = 2.15,
-            changeFormatted = "+2.15%",
+            changePercent = 0.0,
+            changeFormatted = "0.00%",
             isPositive = true,
-            sparklinePoints = listOf(30f, 35f, 40f, 38f, 45f, 50f, 55f, 60f, 68f),
+            sparklinePoints = listOf(50f, 50f, 50f, 50f, 50f),
             sourceApp = "Midas Kripto",
-            binanceReferencePrice = 78.90,
-            leadLagDiffPercent = 0.64
+            binanceReferencePrice = 0.0,
+            leadLagDiffPercent = 0.0
         ),
         CryptoAsset(
             id = "BTC",
             symbol = "BTC",
             name = "Bitcoin",
-            priceFormatted = "$96,480.50",
-            rawPrice = 96480.50,
+            priceFormatted = "$0.00",
+            rawPrice = 0.0,
             currencySymbol = "$",
-            changePercent = 2.42,
-            changeFormatted = "+2.42%",
+            changePercent = 0.0,
+            changeFormatted = "0.00%",
             isPositive = true,
-            sparklinePoints = listOf(40f, 42f, 45f, 44f, 48f, 52f, 50f, 55f, 60f),
+            sparklinePoints = listOf(50f, 50f, 50f, 50f, 50f),
             sourceApp = "Midas Kripto",
-            binanceReferencePrice = 96720.00,
-            leadLagDiffPercent = 0.25
+            binanceReferencePrice = 0.0,
+            leadLagDiffPercent = 0.0
         ),
         CryptoAsset(
             id = "ETH",
             symbol = "ETH",
             name = "Ethereum",
-            priceFormatted = "$2,745.20",
-            rawPrice = 2745.20,
+            priceFormatted = "$0.00",
+            rawPrice = 0.0,
             currencySymbol = "$",
-            changePercent = -0.65,
-            changeFormatted = "-0.65%",
-            isPositive = false,
-            sparklinePoints = listOf(60f, 58f, 55f, 54f, 52f, 53f, 50f, 48f, 47f),
+            changePercent = 0.0,
+            changeFormatted = "0.00%",
+            isPositive = true,
+            sparklinePoints = listOf(50f, 50f, 50f, 50f, 50f),
             sourceApp = "Midas Kripto",
-            binanceReferencePrice = 2758.40,
-            leadLagDiffPercent = 0.48
+            binanceReferencePrice = 0.0,
+            leadLagDiffPercent = 0.0
         ),
         CryptoAsset(
             id = "AVAX",
             symbol = "AVAX",
             name = "Avalanche",
-            priceFormatted = "$28.35",
-            rawPrice = 28.35,
+            priceFormatted = "$0.00",
+            rawPrice = 0.0,
             currencySymbol = "$",
-            changePercent = 3.10,
-            changeFormatted = "+3.10%",
+            changePercent = 0.0,
+            changeFormatted = "0.00%",
             isPositive = true,
-            sparklinePoints = listOf(45f, 46f, 44f, 47f, 48f, 50f, 52f, 51f, 53f),
+            sparklinePoints = listOf(50f, 50f, 50f, 50f, 50f),
             sourceApp = "Midas Kripto",
-            binanceReferencePrice = 28.60,
-            leadLagDiffPercent = 0.88
+            binanceReferencePrice = 0.0,
+            leadLagDiffPercent = 0.0
         )
     )
 
-    private val _cryptoAssets = MutableStateFlow<List<CryptoAsset>>(defaultAssets)
+    private val _cryptoAssets = MutableStateFlow<List<CryptoAsset>>(initialAssets)
     val cryptoAssets: StateFlow<List<CryptoAsset>> = _cryptoAssets.asStateFlow()
 
     private val _midasAccountState = MutableStateFlow(
         MidasAccountState(
-            availableCash = 50.00,
+            availableCash = 0.00,
             currencySymbol = "$",
             isCashDetectedFromScreen = false,
             currentViewedSymbol = "SOL"
@@ -126,126 +127,131 @@ object CryptoOverlayRepository {
     private val _isAccessibilityConnected = MutableStateFlow(false)
     val isAccessibilityConnected: StateFlow<Boolean> = _isAccessibilityConnected.asStateFlow()
 
+    // 100% Real Trading Mode (Simulation completely disabled for pure production)
     private val _isSimulationActive = MutableStateFlow(false)
     val isSimulationActive: StateFlow<Boolean> = _isSimulationActive.asStateFlow()
 
     init {
-        updateOracleState(_cryptoAssets.value)
-        startLiveBinancePolling()
+        startRealMarketDataEngine()
     }
 
-    private fun startLiveBinancePolling() {
+    /**
+     * Continuous Real-time Binance Public API & Lead-Lag Polling Engine
+     */
+    fun startRealMarketDataEngine() {
         livePriceJob?.cancel()
-        livePriceJob = repositoryScope.launch(Dispatchers.IO) {
+        livePriceJob = repositoryScope.launch {
             while (isActive) {
                 try {
                     fetchRealBinancePrices()
+                    fetchTechnicalCandles()
                 } catch (e: Exception) {
-                    // Ignore network errors in background
+                    // Fail gracefully on transient network interruptions
                 }
-                delay(3000L) // Refresh every 3 seconds for live rates
+                delay(2000) // Fast 2-second real-time market refresh
             }
         }
     }
 
     private suspend fun fetchRealBinancePrices() = withContext(Dispatchers.IO) {
-        val symbolsToTrack = listOf("SOLUSDT", "BTCUSDT", "ETHUSDT", "AVAXUSDT", "XRPUSDT", "DOGEUSDT", "SUIUSDT")
-        val symbolsJson = symbolsToTrack.joinToString(prefix = "[", postfix = "]", separator = ",") { "\"$it\"" }
-        val urlStr = "https://api.binance.com/api/v3/ticker/24hr?symbols=$symbolsJson"
+        val pairs = listOf("SOLUSDT", "BTCUSDT", "ETHUSDT", "AVAXUSDT", "XRPUSDT", "DOGEUSDT", "PEPEUSDT", "SUIUSDT")
+        val pairsParam = pairs.joinToString(prefix = "[\"", separator = "\",\"", postfix = "\"]")
+        val urlString = "https://api.binance.com/api/v3/ticker/24hr?symbols=$pairsParam"
 
-        val url = URL(urlStr)
-        val conn = (url.openConnection() as HttpURLConnection).apply {
-            requestMethod = "GET"
-            connectTimeout = 4000
-            readTimeout = 4000
-            setRequestProperty("Accept", "application/json")
-        }
+        try {
+            val url = URL(urlString)
+            val conn = url.openConnection() as HttpURLConnection
+            conn.requestMethod = "GET"
+            conn.connectTimeout = 3000
+            conn.readTimeout = 3000
 
-        if (conn.responseCode == 200) {
-            val reader = BufferedReader(InputStreamReader(conn.inputStream))
-            val response = reader.readText()
-            reader.close()
+            if (conn.responseCode == 200) {
+                val reader = BufferedReader(InputStreamReader(conn.inputStream))
+                val response = reader.readText()
+                reader.close()
 
-            val jsonArray = JSONArray(response)
-            val updatedList = _cryptoAssets.value.toMutableList()
+                val jsonArray = JSONArray(response)
+                val newOracleMap = mutableMapOf<String, BinanceOracleData>()
+                val updatedAssets = _cryptoAssets.value.toMutableList()
 
-            for (i in 0 until jsonArray.length()) {
-                val item = jsonArray.getJSONObject(i)
-                val pair = item.getString("symbol")
-                val symbol = pair.removeSuffix("USDT")
-                val lastPrice = item.getDouble("lastPrice")
-                val priceChangePercent = item.getDouble("priceChangePercent")
+                for (i in 0 until jsonArray.length()) {
+                    val obj = jsonArray.getJSONObject(i)
+                    val symbolPair = obj.getString("symbol")
+                    val rawSymbol = symbolPair.replace("USDT", "")
+                    val lastPrice = obj.getString("lastPrice").toDoubleOrNull() ?: continue
+                    val priceChangePercent = obj.getString("priceChangePercent").toDoubleOrNull() ?: 0.0
+                    val highPrice = obj.getString("highPrice").toDoubleOrNull() ?: lastPrice
+                    val lowPrice = obj.getString("lowPrice").toDoubleOrNull() ?: lastPrice
+                    val volume = obj.getString("volume").toDoubleOrNull() ?: 0.0
 
-                val existingIdx = updatedList.indexOfFirst { it.symbol.equals(symbol, ignoreCase = true) }
-                if (existingIdx >= 0) {
-                    val existing = updatedList[existingIdx]
-                    // If user is not running simulation, update to real live price
-                    if (!_isSimulationActive.value) {
-                        val midasPrice = existing.rawPrice.takeIf { it > 0 && it != defaultAssets.find { d -> d.symbol == symbol }?.rawPrice } ?: (lastPrice * 0.994) // Default Midas is slightly lagging spot
-                        val spread = ((lastPrice - midasPrice) / midasPrice) * 100.0
-                        val prefix = if (priceChangePercent >= 0) "+" else ""
+                    val existingAsset = updatedAssets.firstOrNull { it.symbol == rawSymbol }
+                    val midasPrice = if (existingAsset != null && existingAsset.rawPrice > 0) existingAsset.rawPrice else lastPrice
 
-                        updatedList[existingIdx] = existing.copy(
-                            rawPrice = lastPrice,
-                            priceFormatted = formatPrice(lastPrice, "$"),
+                    val leadLagSpread = if (midasPrice > 0) {
+                        ((lastPrice - midasPrice) / midasPrice) * 100.0
+                    } else 0.0
+
+                    val netProfitIfArb = if (leadLagSpread > 0.40) leadLagSpread - 0.40 else 0.0
+
+                    newOracleMap[rawSymbol] = BinanceOracleData(
+                        symbol = rawSymbol,
+                        binanceGlobalPrice = lastPrice,
+                        midasCurrentPrice = midasPrice,
+                        leadLagSpreadPercent = leadLagSpread,
+                        signalRecommendation = if (leadLagSpread > 0.85) "GÜÇLÜ AL" else if (leadLagSpread > 0.35) "AL" else "BEKLE",
+                        binancePrice = lastPrice,
+                        midasObservedPrice = midasPrice,
+                        isBinanceLeadingHigher = lastPrice > midasPrice,
+                        estimatedNetArbProfitPercent = netProfitIfArb,
+                        volume24h = volume,
+                        high24h = highPrice,
+                        low24h = lowPrice,
+                        lastUpdated = System.currentTimeMillis()
+                    )
+
+                    // Update asset list
+                    val assetIndex = updatedAssets.indexOfFirst { it.symbol == rawSymbol }
+                    if (assetIndex != -1) {
+                        val curr = updatedAssets[assetIndex]
+                        val displayPrice = if (curr.rawPrice > 0) curr.rawPrice else lastPrice
+                        updatedAssets[assetIndex] = curr.copy(
+                            priceFormatted = "$${String.format(Locale.US, if (displayPrice < 1.0) "%.4f" else "%.2f", displayPrice)}",
+                            rawPrice = displayPrice,
                             changePercent = priceChangePercent,
-                            changeFormatted = "$prefix${String.format(Locale.US, "%.2f", priceChangePercent)}%",
+                            changeFormatted = "${if (priceChangePercent >= 0) "+" else ""}${String.format(Locale.US, "%.2f", priceChangePercent)}%",
                             isPositive = priceChangePercent >= 0,
                             binanceReferencePrice = lastPrice,
-                            leadLagDiffPercent = spread,
-                            detectedAt = System.currentTimeMillis()
+                            leadLagDiffPercent = leadLagSpread
                         )
                     }
-                } else {
-                    val prefix = if (priceChangePercent >= 0) "+" else ""
-                    updatedList.add(
-                        CryptoAsset(
-                            id = symbol,
-                            symbol = symbol,
-                            name = symbol,
-                            priceFormatted = formatPrice(lastPrice, "$"),
-                            rawPrice = lastPrice,
-                            currencySymbol = "$",
-                            changePercent = priceChangePercent,
-                            changeFormatted = "$prefix${String.format(Locale.US, "%.2f", priceChangePercent)}%",
-                            isPositive = priceChangePercent >= 0,
-                            binanceReferencePrice = lastPrice,
-                            leadLagDiffPercent = 0.50,
-                            sourceApp = "Binance Canlı"
-                        )
-                    )
                 }
+
+                _binanceOracleMap.value = newOracleMap
+                _cryptoAssets.value = updatedAssets
             }
-
-            _cryptoAssets.value = updatedList
-            updateOracleState(updatedList)
-
-            // Also fetch institutional 5m Kline data for primary coins (SOL, BTC, ETH, AVAX)
-            fetch5mKlinesForSymbols(listOf("SOLUSDT", "BTCUSDT", "ETHUSDT", "AVAXUSDT"))
+            conn.disconnect()
+        } catch (e: Exception) {
+            // Keep existing prices on connection drop
         }
-        conn.disconnect()
     }
 
-    private suspend fun fetch5mKlinesForSymbols(pairs: List<String>) = withContext(Dispatchers.IO) {
-        val analysisResults = _technicalAnalysisMap.value.toMutableMap()
+    private suspend fun fetchTechnicalCandles() = withContext(Dispatchers.IO) {
+        val analysisResults = mutableMapOf<String, com.example.model.TechnicalAnalysis5m>()
+        val symbolsToAnalyze = listOf("SOL", "BTC", "ETH", "AVAX")
 
-        for (pair in pairs) {
+        for (symbol in symbolsToAnalyze) {
             try {
-                val symbol = pair.removeSuffix("USDT")
-                val klineUrl = URL("https://api.binance.com/api/v3/klines?symbol=$pair&interval=5m&limit=30")
-                val conn = (klineUrl.openConnection() as HttpURLConnection).apply {
-                    requestMethod = "GET"
-                    connectTimeout = 3000
-                    readTimeout = 3000
-                    setRequestProperty("Accept", "application/json")
-                }
+                val url = URL("https://api.binance.com/api/v3/klines?symbol=${symbol}USDT&interval=5m&limit=30")
+                val conn = url.openConnection() as HttpURLConnection
+                conn.connectTimeout = 3000
+                conn.readTimeout = 3000
 
                 if (conn.responseCode == 200) {
                     val reader = BufferedReader(InputStreamReader(conn.inputStream))
-                    val body = reader.readText()
+                    val response = reader.readText()
                     reader.close()
 
-                    val rawArray = JSONArray(body)
+                    val rawArray = JSONArray(response)
                     val candleList = mutableListOf<com.example.model.CandleStick>()
 
                     for (i in 0 until rawArray.length()) {
@@ -299,6 +305,7 @@ object CryptoOverlayRepository {
     }
 
     fun updateMidasCash(cash: Double, currency: String = "$", fromScreen: Boolean = true) {
+        if (cash < 0) return
         _midasAccountState.update { current ->
             current.copy(
                 availableCash = cash,
@@ -320,105 +327,29 @@ object CryptoOverlayRepository {
         detectedCash: Double? = null
     ) {
         if (assets.isNotEmpty()) {
-            _cryptoAssets.value = assets
-            updateOracleState(assets)
+            val currentMap = _cryptoAssets.value.associateBy { it.symbol }.toMutableMap()
+            assets.forEach { incoming ->
+                currentMap[incoming.symbol] = incoming
+            }
+            _cryptoAssets.value = currentMap.values.toList()
             updateViewedSymbol(assets.first().symbol)
         }
+
         if (detectedCash != null && detectedCash > 0) {
             updateMidasCash(detectedCash, fromScreen = true)
         }
 
-        val timeFormat = SimpleDateFormat("HH:mm:ss.SSS", Locale.getDefault())
+        val timeFormat = SimpleDateFormat("HH:mm:ss", Locale.getDefault())
         val log = ScreenReaderLog(
             timestamp = timeFormat.format(Date()),
             sourcePackage = sourcePackage,
-            rawTextExtracted = rawText.take(150),
+            rawTextExtracted = rawText.take(120),
             detectedSymbols = assets.map { it.symbol },
             parsedPriceCount = assets.size,
             detectedCash = detectedCash
         )
         _screenLogs.update { current ->
-            (listOf(log) + current).take(50)
-        }
-    }
-
-    private fun updateOracleState(assets: List<CryptoAsset>) {
-        val map = mutableMapOf<String, BinanceOracleData>()
-        assets.forEach { asset ->
-            val binancePrice = if (asset.binanceReferencePrice > 0) {
-                asset.binanceReferencePrice
-            } else {
-                asset.rawPrice * 1.0065 // Binance leads by +0.65%
-            }
-            val spreadPercent = ((binancePrice - asset.rawPrice) / asset.rawPrice) * 100.0
-            val recommendation = if (spreadPercent > 0.40) "MİDAS'TA UCUZ (AL)" else if (spreadPercent < -0.40) "ZİRVEDE (KÂR AL)" else "NÖTR"
-
-            map[asset.symbol] = BinanceOracleData(
-                symbol = asset.symbol,
-                binanceGlobalPrice = binancePrice,
-                midasCurrentPrice = asset.rawPrice,
-                leadLagSpreadPercent = spreadPercent,
-                signalRecommendation = recommendation,
-                confidence = 0.94
-            )
-        }
-        _binanceOracleMap.value = map
-    }
-
-    fun toggleSimulation(active: Boolean) {
-        _isSimulationActive.value = active
-        if (active) {
-            startSimulation()
-        } else {
-            simulationJob?.cancel()
-            simulationJob = null
-        }
-    }
-
-    private fun startSimulation() {
-        simulationJob?.cancel()
-        simulationJob = repositoryScope.launch {
-            while (isActive) {
-                delay(2500L)
-                val current = _cryptoAssets.value
-                val updated = current.map { asset ->
-                    val binanceLeadDelta = Random.nextDouble(-0.8, 1.2)
-                    val binancePrice = (asset.binanceReferencePrice.takeIf { it > 0 } ?: asset.rawPrice) * (1 + binanceLeadDelta / 100.0)
-
-                    // Midas follows Binance with slight micro-lag (giving user the profit edge!)
-                    val midasDelta = binanceLeadDelta * 0.7
-                    val newMidasPrice = (asset.rawPrice * (1 + midasDelta / 100.0)).coerceAtLeast(0.01)
-
-                    val spread = ((binancePrice - newMidasPrice) / newMidasPrice) * 100.0
-                    val newPoints = (asset.sparklinePoints.drop(1) + (asset.sparklinePoints.last() + midasDelta.toFloat() * 1.5f)).takeLast(9)
-                    val newChange = asset.changePercent + midasDelta
-                    val prefix = if (newChange >= 0) "+" else ""
-
-                    asset.copy(
-                        rawPrice = newMidasPrice,
-                        priceFormatted = formatPrice(newMidasPrice, asset.currencySymbol),
-                        changePercent = newChange,
-                        changeFormatted = "$prefix${String.format(Locale.US, "%.2f", newChange)}%",
-                        isPositive = newChange >= 0,
-                        sparklinePoints = newPoints,
-                        binanceReferencePrice = binancePrice,
-                        leadLagDiffPercent = spread,
-                        detectedAt = System.currentTimeMillis()
-                    )
-                }
-                _cryptoAssets.value = updated
-                updateOracleState(updated)
-            }
-        }
-    }
-
-    private fun formatPrice(price: Double, currency: String): String {
-        return if (price >= 1000) {
-            String.format(Locale.US, "%s%,.2f", currency, price)
-        } else if (price >= 1) {
-            String.format(Locale.US, "%s%.2f", currency, price)
-        } else {
-            String.format(Locale.US, "%s%.4f", currency, price)
+            (listOf(log) + current).take(25)
         }
     }
 }

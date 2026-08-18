@@ -18,7 +18,7 @@ data class CryptoAsset(
 )
 
 data class MidasAccountState(
-    val availableCash: Double = 500.0, // Default or parsed cash from Midas screen
+    val availableCash: Double = 0.0, // Default 0.0 until detected from screen or set by user
     val currencySymbol: String = "$", // "$" or "₺"
     val isCashDetectedFromScreen: Boolean = false,
     val currentViewedSymbol: String = "SOL",
@@ -27,11 +27,19 @@ data class MidasAccountState(
 
 data class BinanceOracleData(
     val symbol: String,
-    val binanceGlobalPrice: Double,
-    val midasCurrentPrice: Double,
-    val leadLagSpreadPercent: Double, // If positive, Binance is higher -> Midas is cheap!
-    val signalRecommendation: String, // "GÜÇLÜ AL", "BEKLE", "KÂR AL"
-    val confidence: Double = 0.95
+    val binanceGlobalPrice: Double = 0.0,
+    val midasCurrentPrice: Double = 0.0,
+    val leadLagSpreadPercent: Double = 0.0, // If positive, Binance is higher -> Midas is cheap!
+    val signalRecommendation: String = "BEKLE", // "GÜÇLÜ AL", "BEKLE", "KÂR AL"
+    val confidence: Double = 0.95,
+    val binancePrice: Double = binanceGlobalPrice,
+    val midasObservedPrice: Double = midasCurrentPrice,
+    val isBinanceLeadingHigher: Boolean = leadLagSpreadPercent > 0,
+    val estimatedNetArbProfitPercent: Double = 0.0,
+    val volume24h: Double = 0.0,
+    val high24h: Double = 0.0,
+    val low24h: Double = 0.0,
+    val lastUpdated: Long = System.currentTimeMillis()
 )
 
 data class OverlayConfig(

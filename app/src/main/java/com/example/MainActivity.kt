@@ -113,7 +113,6 @@ class MainActivity : ComponentActivity() {
                         hasAccessibilityPermission = hasAccessibilityPermission,
                         hasBatteryOptimizationIgnored = hasBatteryOptimizationIgnored,
                         isOverlayRunning = isOverlayRunning,
-                        isSimulationActive = isSimulationActive,
                         config = overlayConfig,
                         assets = cryptoAssets,
                         screenLogs = screenLogs,
@@ -129,9 +128,6 @@ class MainActivity : ComponentActivity() {
                         onRequestBatteryOptimization = { requestBatteryOptimizationExemption() },
                         onToggleOverlayService = { start ->
                             if (start) startFloatingService() else stopFloatingService()
-                        },
-                        onToggleSimulation = { active ->
-                            CryptoOverlayRepository.toggleSimulation(active)
                         },
                         onUpdateConfig = { updated ->
                             CryptoOverlayRepository.updateConfig(updated)
@@ -313,7 +309,6 @@ fun MidasTraderMainScreen(
     hasAccessibilityPermission: Boolean,
     hasBatteryOptimizationIgnored: Boolean,
     isOverlayRunning: Boolean,
-    isSimulationActive: Boolean,
     config: OverlayConfig,
     assets: List<CryptoAsset>,
     screenLogs: List<ScreenReaderLog>,
@@ -328,7 +323,6 @@ fun MidasTraderMainScreen(
     onRequestAccessibilityPermission: () -> Unit,
     onRequestBatteryOptimization: () -> Unit,
     onToggleOverlayService: (Boolean) -> Unit,
-    onToggleSimulation: (Boolean) -> Unit,
     onUpdateConfig: (OverlayConfig) -> Unit,
     onConfirmSignal: (TradeSignalEntity) -> Unit,
     onRejectSignal: (TradeSignalEntity) -> Unit,
@@ -376,9 +370,7 @@ fun MidasTraderMainScreen(
                 hasOverlayPermission = hasOverlayPermission,
                 hasAccessibilityPermission = hasAccessibilityPermission,
                 hasBatteryOptimizationIgnored = hasBatteryOptimizationIgnored,
-                isSimulationActive = isSimulationActive,
                 onToggleService = onToggleOverlayService,
-                onToggleSimulation = onToggleSimulation,
                 onRequestOverlay = onRequestOverlayPermission,
                 onRequestAccessibility = onRequestAccessibilityPermission,
                 onRequestBatteryOptimization = onRequestBatteryOptimization
@@ -518,6 +510,68 @@ fun MidasCashAndOracleCard(
     onTriggerManual: (String) -> Unit,
     onManualSetCash: (Double) -> Unit
 ) {
+    var showEditCashDialog by remember { mutableStateOf(false) }
+    var inputCashText by remember { mutableStateOf(if (midasAccount.availableCash > 0) midasAccount.availableCash.toString() else "50.0") }
+
+    if (showEditCashDialog) {
+        AlertDialog(
+            onDismissRequest = { showEditCashDialog = false },
+            containerColor = Color(0xFF0F141C),
+            title = {
+                Text(
+                    text = "Midas USDT Bakiyesi Belirle",
+                    color = Color.White,
+                    fontWeight = FontWeight.Bold,
+                    fontSize = 16.sp
+                )
+            },
+            text = {
+                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Text(
+                        text = "Midas Kripto hesabınızdaki kullanılabilir USDT miktarını girin. Bot otomatik alımlarda bu bakiye üzerinden güvenli kademe hesaplayacaktır.",
+                        color = TextSecondary,
+                        fontSize = 12.sp
+                    )
+                    OutlinedTextField(
+                        value = inputCashText,
+                        onValueChange = { inputCashText = it },
+                        label = { Text("Kullanılabilir USDT ($)") },
+                        singleLine = true,
+                        colors = OutlinedTextFieldDefaults.colors(
+                            focusedBorderColor = CyberEmerald,
+                            unfocusedBorderColor = OledCardBorder,
+                            focusedTextColor = Color.White,
+                            unfocusedTextColor = Color.White
+                        ),
+                        modifier = Modifier.fillMaxWidth()
+                    )
+                }
+            },
+            confirmButton = {
+                Button(
+                    onClick = {
+                        val parsed = inputCashText.toDoubleOrNull()
+                        if (parsed != null && parsed >= 0) {
+                            onManualSetCash(parsed)
+                        }
+                        showEditCashDialog = false
+                    },
+                    colors = ButtonDefaults.buttonColors(
+                        containerColor = CyberEmerald,
+                        contentColor = Color.Black
+                    )
+                ) {
+                    Text("KAYDET", fontWeight = FontWeight.Bold)
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { showEditCashDialog = false }) {
+                    Text("İPTAL", color = TextSecondary)
+                }
+            }
+        )
+    }
+
     Surface(
         modifier = Modifier
             .fillMaxWidth()
@@ -549,18 +603,32 @@ fun MidasCashAndOracleCard(
                     )
                 }
 
-                Surface(
-                    color = CyberEmerald.copy(alpha = 0.15f),
-                    shape = RoundedCornerShape(8.dp)
-                ) {
-                    Text(
-                        text = if (midasAccount.isCashDetectedFromScreen) "Ekrandan Okundu" else "Sanal Test Modu",
-                        color = CyberEmerald,
-                        fontSize = 10.sp,
-                        fontWeight = FontWeight.Bold,
-                        fontFamily = FontFamily.Monospace,
-                        modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
-                    )
+                Row(horizontalArrangement = Arrangement.spacedBy(6.dp), verticalAlignment = Alignment.CenterVertically) {
+                    Surface(
+                        color = if (midasAccount.isCashDetectedFromScreen) CyberEmerald.copy(alpha = 0.15f) else CyberCyan.copy(alpha = 0.15f),
+                        shape = RoundedCornerShape(8.dp)
+                    ) {
+                        Text(
+                            text = if (midasAccount.isCashDetectedFromScreen) "Ekrandan Okundu" else "Doğrulanmış Bakiye",
+                            color = if (midasAccount.isCashDetectedFromScreen) CyberEmerald else CyberCyan,
+                            fontSize = 10.sp,
+                            fontWeight = FontWeight.Bold,
+                            fontFamily = FontFamily.Monospace,
+                            modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
+                        )
+                    }
+
+                    OutlinedButton(
+                        onClick = { showEditCashDialog = true },
+                        modifier = Modifier.height(28.dp),
+                        contentPadding = PaddingValues(horizontal = 8.dp, vertical = 0.dp),
+                        shape = RoundedCornerShape(6.dp),
+                        border = androidx.compose.foundation.BorderStroke(1.dp, CyberEmerald)
+                    ) {
+                        Icon(imageVector = Icons.Default.Edit, contentDescription = null, tint = CyberEmerald, modifier = Modifier.size(12.dp))
+                        Spacer(modifier = Modifier.width(4.dp))
+                        Text(text = "Düzenle", color = CyberEmerald, fontSize = 10.sp, fontWeight = FontWeight.Bold)
+                    }
                 }
             }
 
@@ -905,9 +973,7 @@ fun TraderMasterControlsCard(
     hasOverlayPermission: Boolean,
     hasAccessibilityPermission: Boolean,
     hasBatteryOptimizationIgnored: Boolean,
-    isSimulationActive: Boolean,
     onToggleService: (Boolean) -> Unit,
-    onToggleSimulation: (Boolean) -> Unit,
     onRequestOverlay: () -> Unit,
     onRequestAccessibility: () -> Unit,
     onRequestBatteryOptimization: () -> Unit
@@ -987,42 +1053,53 @@ fun TraderMasterControlsCard(
 
             Spacer(modifier = Modifier.height(8.dp))
 
-            // Test Simulation Toggle
-            Row(
+            // Real-Time Arbitrage Engine Status Row
+            Surface(
                 modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically
+                color = Color(0xFF070B12),
+                shape = RoundedCornerShape(8.dp),
+                border = androidx.compose.foundation.BorderStroke(0.8.dp, CyberEmerald.copy(alpha = 0.3f))
             ) {
-                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 12.dp, vertical = 8.dp),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        Box(
+                            modifier = Modifier
+                                .size(8.dp)
+                                .clip(CircleShape)
+                                .background(CyberEmerald)
+                        )
+                        Column {
+                            Text(
+                                text = "Binance Global Fiyat Radarı: CANLI",
+                                color = CyberEmerald,
+                                fontSize = 11.sp,
+                                fontWeight = FontWeight.Bold,
+                                fontFamily = FontFamily.Monospace
+                            )
+                            Text(
+                                text = "Gecikme (Lead-Lag) ve %0.40 komisyon kalkanı aktif",
+                                color = TextTertiary,
+                                fontSize = 10.sp
+                            )
+                        }
+                    }
+
                     Icon(
-                        imageVector = Icons.Default.Sensors,
+                        imageVector = Icons.Default.TrendingUp,
                         contentDescription = null,
-                        tint = if (isSimulationActive) CyberCyan else TextSecondary,
+                        tint = CyberEmerald,
                         modifier = Modifier.size(18.dp)
                     )
-                    Column {
-                        Text(
-                            text = "Canlı Simülasyon Akışı",
-                            color = TextPrimary,
-                            fontSize = 13.sp,
-                            fontWeight = FontWeight.SemiBold
-                        )
-                        Text(
-                            text = "Midas kapalıyken test fiyatları ve emirler üretir",
-                            color = TextTertiary,
-                            fontSize = 10.sp
-                        )
-                    }
                 }
-
-                Switch(
-                    checked = isSimulationActive,
-                    onCheckedChange = onToggleSimulation,
-                    colors = SwitchDefaults.colors(
-                        checkedThumbColor = Color.Black,
-                        checkedTrackColor = CyberCyan
-                    )
-                )
             }
         }
     }

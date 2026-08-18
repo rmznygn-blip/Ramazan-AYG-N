@@ -71,6 +71,7 @@ class FloatingOverlayService : Service() {
     private var overlayComposeView: ComposeView? = null
     private var layoutParams: WindowManager.LayoutParams? = null
     private lateinit var traderRepository: CryptoTraderRepository
+    private var wakeLock: android.os.PowerManager.WakeLock? = null
 
     private val serviceLifecycleOwner = OverlayServiceLifecycleOwner()
 
@@ -84,6 +85,15 @@ class FloatingOverlayService : Service() {
     override fun onCreate() {
         super.onCreate()
         traderRepository = CryptoTraderRepository.getInstance(this)
+
+        try {
+            val powerManager = getSystemService(Context.POWER_SERVICE) as? android.os.PowerManager
+            wakeLock = powerManager?.newWakeLock(android.os.PowerManager.PARTIAL_WAKE_LOCK, "MidasTrader::OverlayWakeLock")?.apply {
+                acquire(12 * 60 * 60 * 1000L) // 12 hours max safety
+            }
+        } catch (e: Exception) {
+            e.printStackTrace()
+        }
 
         serviceLifecycleOwner.performRestore(null)
         serviceLifecycleOwner.handleLifecycleEvent(Lifecycle.Event.ON_CREATE)
@@ -233,6 +243,14 @@ class FloatingOverlayService : Service() {
 
     override fun onDestroy() {
         super.onDestroy()
+        try {
+            if (wakeLock?.isHeld == true) {
+                wakeLock?.release()
+            }
+        } catch (e: Exception) {
+            e.printStackTrace()
+        }
+
         CryptoOverlayRepository.updateOverlayRunning(false)
         serviceLifecycleOwner.handleLifecycleEvent(Lifecycle.Event.ON_PAUSE)
         serviceLifecycleOwner.handleLifecycleEvent(Lifecycle.Event.ON_STOP)
