@@ -103,7 +103,17 @@ class MainActivity : ComponentActivity() {
                     topBar = {
                         CryptoTraderTopBar(
                             isOverlayRunning = isOverlayRunning,
-                            isAccessibilityActive = hasAccessibilityPermission
+                            isAccessibilityActive = hasAccessibilityPermission,
+                            isAutoScanActive = traderSettings.isAutoScanActive,
+                            targetExchangeName = traderSettings.targetExchangeName,
+                            onToggleAutoScan = { active ->
+                                traderRepository.updateSettings { it.copy(isAutoScanActive = active) }
+                                Toast.makeText(
+                                    this,
+                                    if (active) "⚡ Otomatik Fırsat Tarama Başlatıldı!" else "🛑 Tarama ve Emirler Acil Durduruldu!",
+                                    Toast.LENGTH_SHORT
+                                ).show()
+                            }
                         )
                     }
                 ) { innerPadding ->
@@ -246,7 +256,10 @@ class MainActivity : ComponentActivity() {
 @Composable
 fun CryptoTraderTopBar(
     isOverlayRunning: Boolean,
-    isAccessibilityActive: Boolean
+    isAccessibilityActive: Boolean,
+    isAutoScanActive: Boolean,
+    targetExchangeName: String,
+    onToggleAutoScan: (Boolean) -> Unit
 ) {
     TopAppBar(
         title = {
@@ -258,20 +271,20 @@ fun CryptoTraderTopBar(
                     modifier = Modifier
                         .size(10.dp)
                         .clip(CircleShape)
-                        .background(if (isOverlayRunning) CyberEmerald else CyberAmber)
+                        .background(if (isAutoScanActive) CyberEmerald else CyberCrimson)
                 )
                 Column {
                     Text(
-                        text = "MIDAS SMART TRADER",
+                        text = "KRİPTO ARBİTRAJ TERMİNALİ",
                         color = TextPrimary,
                         fontWeight = FontWeight.Black,
                         fontFamily = FontFamily.Monospace,
-                        fontSize = 16.sp,
-                        letterSpacing = 1.2.sp
+                        fontSize = 15.sp,
+                        letterSpacing = 1.sp
                     )
                     Text(
-                        text = "Binance Oracle • Self-Learning Odası",
-                        color = TextTertiary,
+                        text = "Hedef: $targetExchangeName • Binance Oracle",
+                        color = if (isAutoScanActive) CyberEmerald else TextTertiary,
                         fontSize = 10.sp,
                         fontFamily = FontFamily.Monospace
                     )
@@ -283,19 +296,29 @@ fun CryptoTraderTopBar(
             titleContentColor = TextPrimary
         ),
         actions = {
-            Surface(
-                color = OledCardSurface,
-                shape = RoundedCornerShape(16.dp),
-                border = androidx.compose.foundation.BorderStroke(1.dp, OledCardBorder),
-                modifier = Modifier.padding(end = 12.dp)
+            Button(
+                onClick = { onToggleAutoScan(!isAutoScanActive) },
+                colors = ButtonDefaults.buttonColors(
+                    containerColor = if (isAutoScanActive) CyberCrimson.copy(alpha = 0.2f) else CyberEmerald,
+                    contentColor = if (isAutoScanActive) CyberCrimson else Color.Black
+                ),
+                shape = RoundedCornerShape(8.dp),
+                contentPadding = PaddingValues(horizontal = 10.dp, vertical = 4.dp),
+                modifier = Modifier
+                    .padding(end = 12.dp)
+                    .height(32.dp)
             ) {
+                Icon(
+                    imageVector = if (isAutoScanActive) Icons.Default.PauseCircle else Icons.Default.PlayArrow,
+                    contentDescription = null,
+                    modifier = Modifier.size(16.dp)
+                )
+                Spacer(modifier = Modifier.width(4.dp))
                 Text(
-                    text = "v1.0-RC1",
-                    color = CyberEmerald,
+                    text = if (isAutoScanActive) "DURDUR" else "BAŞLAT",
                     fontSize = 11.sp,
-                    fontFamily = FontFamily.Monospace,
-                    fontWeight = FontWeight.Bold,
-                    modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
+                    fontWeight = FontWeight.Black,
+                    fontFamily = FontFamily.Monospace
                 )
             }
         }
@@ -363,7 +386,19 @@ fun MidasTraderMainScreen(
             )
         }
 
-        // 3. MASTER SERVICE TOGGLES
+        // 3. EVENING ROUTINE & $10-$15 DAILY TARGET CARD
+        item {
+            EveningRoutineTargetCard(
+                settings = settings,
+                midasAccount = midasAccount,
+                learningMetrics = learningMetrics,
+                onToggleSniperMode = { active ->
+                    onUpdateSettings(settings.copy(isEveningSniperMode = active))
+                }
+            )
+        }
+
+        // 4. MASTER SERVICE TOGGLES
         item {
             TraderMasterControlsCard(
                 isOverlayRunning = isOverlayRunning,
@@ -756,6 +791,186 @@ fun MidasCashAndOracleCard(
                         }
                     }
                 }
+            }
+        }
+    }
+}
+
+@Composable
+fun EveningRoutineTargetCard(
+    settings: TraderSettings,
+    midasAccount: MidasAccountState,
+    learningMetrics: List<LearningMetricEntity>,
+    onToggleSniperMode: (Boolean) -> Unit
+) {
+    val totalRealized = learningMetrics.sumOf { it.totalNetProfitRealized }
+    val targetUsd = settings.dailyProfitTargetUsd
+    val progress = (totalRealized / targetUsd).toFloat().coerceIn(0f, 1f)
+
+    Surface(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(16.dp))
+            .border(1.2.dp, if (settings.isEveningSniperMode) CyberEmerald.copy(alpha = 0.7f) else OledCardBorder, RoundedCornerShape(16.dp)),
+        color = Color(0xFF090E14)
+    ) {
+        Column(
+            modifier = Modifier.padding(16.dp),
+            verticalArrangement = Arrangement.spacedBy(10.dp)
+        ) {
+            // Header
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Text(
+                        text = "🌙 AKŞAM SEANSI & GÜNLÜK KÂR HEDEFİ",
+                        color = Color.White,
+                        fontWeight = FontWeight.Black,
+                        fontSize = 12.sp,
+                        fontFamily = FontFamily.Monospace
+                    )
+                }
+
+                Surface(
+                    color = if (settings.isEveningSniperMode) CyberEmerald.copy(alpha = 0.2f) else CyberCyan.copy(alpha = 0.15f),
+                    shape = RoundedCornerShape(6.dp)
+                ) {
+                    Text(
+                        text = if (settings.isEveningSniperMode) "🎯 Sniper Dip Aktif" else "Standart Mod",
+                        color = if (settings.isEveningSniperMode) CyberEmerald else CyberCyan,
+                        fontSize = 10.sp,
+                        fontWeight = FontWeight.Bold,
+                        fontFamily = FontFamily.Monospace,
+                        modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
+                    )
+                }
+            }
+
+            // Daily Target Progress Bar
+            Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Text(
+                        text = "Kasadaki Realize Kâr: +$${String.format(Locale.US, "%.2f", totalRealized)}",
+                        color = CyberEmerald,
+                        fontWeight = FontWeight.Black,
+                        fontSize = 14.sp,
+                        fontFamily = FontFamily.Monospace
+                    )
+                    Text(
+                        text = "Hedef: $${String.format(Locale.US, "%.2f", targetUsd)} (%${(progress * 100).toInt()})",
+                        color = TextSecondary,
+                        fontSize = 11.sp,
+                        fontFamily = FontFamily.Monospace
+                    )
+                }
+
+                LinearProgressIndicator(
+                    progress = { progress },
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(8.dp)
+                        .clip(RoundedCornerShape(4.dp)),
+                    color = CyberEmerald,
+                    trackColor = OledCardSurface,
+                )
+            }
+
+            // Peaceful Routine Explainer
+            Surface(
+                modifier = Modifier.fillMaxWidth(),
+                color = Color(0xFF04070B),
+                shape = RoundedCornerShape(8.dp),
+                border = androidx.compose.foundation.BorderStroke(0.6.dp, OledCardBorder)
+            ) {
+                Column(modifier = Modifier.padding(10.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                    Text(
+                        text = "🧘‍♂️ Sakin & Güvenli Akşam Stratejisi:",
+                        color = CyberCyan,
+                        fontSize = 11.sp,
+                        fontWeight = FontWeight.Bold
+                    )
+                    Text(
+                        text = "İşten çıkıp interneti açtığınızda sistem arkada sakince çalışır. Acele işlem yapmaz; sadece en sağlam 5Dk dip ve destek seviyesinde Binance Global öncülüğünü yakalar. Pozisyon açıldığında 30-90 dk içinde hedefine ulaşınca Midas'ta kâr alımı yapılır.",
+                        color = TextSecondary,
+                        fontSize = 10.sp,
+                        lineHeight = 14.sp
+                    )
+                }
+            }
+
+            // Compounding Growth Power (Bileşik Kasa Tablosu)
+            Surface(
+                modifier = Modifier.fillMaxWidth(),
+                color = Color(0xFF0B1017),
+                shape = RoundedCornerShape(8.dp)
+            ) {
+                Column(modifier = Modifier.padding(10.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                    Text(
+                        text = "📈 Kasa Büyüdükçe Kâr Katlanma Tablosu:",
+                        color = CyberAmber,
+                        fontSize = 10.sp,
+                        fontWeight = FontWeight.Bold,
+                        fontFamily = FontFamily.Monospace
+                    )
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween
+                    ) {
+                        Text("💵 50$ Kasa ➔ İşlem Başı: +$1.00", color = TextPrimary, fontSize = 10.sp, fontFamily = FontFamily.Monospace)
+                        Text("🎯 1-2 İşlem/Gün", color = CyberEmerald, fontSize = 10.sp, fontWeight = FontWeight.Bold)
+                    }
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween
+                    ) {
+                        Text("💵 150$ Kasa ➔ İşlem Başı: +$2.75", color = TextPrimary, fontSize = 10.sp, fontFamily = FontFamily.Monospace)
+                        Text("🎯 2 İşlem/Gün", color = CyberEmerald, fontSize = 10.sp, fontWeight = FontWeight.Bold)
+                    }
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween
+                    ) {
+                        Text("💵 500$ Kasa ➔ İşlem Başı: +$9.00", color = TextPrimary, fontSize = 10.sp, fontFamily = FontFamily.Monospace)
+                        Text("🚀 Günlük Hedef Tamam", color = CyberEmerald, fontSize = 10.sp, fontWeight = FontWeight.Bold)
+                    }
+                }
+            }
+
+            // Sniper Mode Switch
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Column {
+                    Text(
+                        text = "Sakin Sniper Dip Modu",
+                        color = TextPrimary,
+                        fontSize = 12.sp,
+                        fontWeight = FontWeight.Bold
+                    )
+                    Text(
+                        text = "Sadece RSI dipte ve destek seviyesindeyken alım önerir",
+                        color = TextTertiary,
+                        fontSize = 10.sp
+                    )
+                }
+
+                Switch(
+                    checked = settings.isEveningSniperMode,
+                    onCheckedChange = onToggleSniperMode,
+                    colors = SwitchDefaults.colors(
+                        checkedThumbColor = Color.Black,
+                        checkedTrackColor = CyberEmerald
+                    )
+                )
             }
         }
     }
@@ -1643,6 +1858,8 @@ fun MidasTraderSettingsSection(
     onUpdateSettings: (TraderSettings) -> Unit,
     onUpdateConfig: (OverlayConfig) -> Unit
 ) {
+    val context = LocalContext.current
+
     Surface(
         modifier = Modifier
             .fillMaxWidth()
@@ -1655,12 +1872,105 @@ fun MidasTraderSettingsSection(
             verticalArrangement = Arrangement.spacedBy(14.dp)
         ) {
             Text(
-                text = "MİDAS TRADER VE NAKİT AYARLARI",
+                text = "HEDEF BORSA & TRADER AYARLARI",
                 color = TextSecondary,
                 fontSize = 11.sp,
                 fontWeight = FontWeight.Bold,
                 fontFamily = FontFamily.Monospace
             )
+
+            // TARGET EXCHANGE SELECTOR
+            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                Text(
+                    text = "Emir Gönderilecek Hedef Borsa",
+                    color = TextPrimary,
+                    fontSize = 13.sp,
+                    fontWeight = FontWeight.SemiBold
+                )
+                Text(
+                    text = "Sinyal onaylandığında doğrudan bu borsa açılır ve alım ekranı doldurulur.",
+                    color = TextTertiary,
+                    fontSize = 10.sp
+                )
+
+                com.example.util.AppLauncherHelper.SUPPORTED_EXCHANGES.forEach { exchange ->
+                    val isSelected = settings.targetExchangePackage == exchange.packageName
+                    val isInstalled = com.example.util.AppLauncherHelper.isAppInstalled(context, exchange.packageName)
+
+                    Surface(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clickable {
+                                onUpdateSettings(
+                                    settings.copy(
+                                        targetExchangePackage = exchange.packageName,
+                                        targetExchangeName = exchange.name
+                                    )
+                                )
+                                Toast.makeText(context, "Hedef Borsa Seçildi: ${exchange.name}", Toast.LENGTH_SHORT).show()
+                            },
+                        color = if (isSelected) CyberEmerald.copy(alpha = 0.12f) else Color(0xFF070B12),
+                        shape = RoundedCornerShape(10.dp),
+                        border = androidx.compose.foundation.BorderStroke(
+                            1.dp,
+                            if (isSelected) CyberEmerald else OledCardBorder
+                        )
+                    ) {
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(horizontal = 12.dp, vertical = 10.dp),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                                RadioButton(
+                                    selected = isSelected,
+                                    onClick = {
+                                        onUpdateSettings(
+                                            settings.copy(
+                                                targetExchangePackage = exchange.packageName,
+                                                targetExchangeName = exchange.name
+                                            )
+                                        )
+                                    },
+                                    colors = RadioButtonDefaults.colors(selectedColor = CyberEmerald)
+                                )
+                                Column {
+                                    Text(
+                                        text = exchange.iconLabel,
+                                        color = if (isSelected) Color.White else TextPrimary,
+                                        fontWeight = FontWeight.Bold,
+                                        fontSize = 13.sp
+                                    )
+                                    Text(
+                                        text = exchange.packageName,
+                                        color = TextTertiary,
+                                        fontSize = 10.sp,
+                                        fontFamily = FontFamily.Monospace
+                                    )
+                                }
+                            }
+
+                            Surface(
+                                color = if (isInstalled) CyberEmerald.copy(alpha = 0.2f) else CyberAmber.copy(alpha = 0.15f),
+                                shape = RoundedCornerShape(6.dp)
+                            ) {
+                                Text(
+                                    text = if (isInstalled) "✓ Yüklü" else "Yüklü Değil",
+                                    color = if (isInstalled) CyberEmerald else CyberAmber,
+                                    fontSize = 9.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    fontFamily = FontFamily.Monospace,
+                                    modifier = Modifier.padding(horizontal = 6.dp, vertical = 3.dp)
+                                )
+                            }
+                        }
+                    }
+                }
+            }
+
+            Divider(color = DividerColor, thickness = 0.8.dp)
 
             // Cash Allocation per Trade Slider
             Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {

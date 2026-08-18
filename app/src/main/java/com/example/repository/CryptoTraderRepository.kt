@@ -15,13 +15,17 @@ import java.util.Locale
 
 data class TraderSettings(
     val isAutoScanActive: Boolean = true,
+    val isEveningSniperMode: Boolean = true, // Sakin Akşam Seansı: Sadece en dip destek noktalarından alım yapar
+    val dailyProfitTargetUsd: Double = 15.0, // Günlük Kâr Hedefi ($10 - $15)
     val targetNetProfitPercent: Double = 1.80, // Minimum %1.80 NET kâr (komisyonlar tamamen ödendikten sonra)
     val cashAllocationPercent: Double = 33.0, // Her işlemde nakdin %33'ü (Tek coin yerine dengeli 2-3 işlem)
     val maxDcaLevels: Int = 3,
     val soundAlerts: Boolean = true,
     val minBinanceLeadSpread: Double = 0.85, // Binance'ın Midas'tan en az %0.85 önde gitmesi şartı (Gürültüyü engeller)
     val maxConcurrentPositions: Int = 2, // Aynı anda en fazla 2 aktif işlem
-    val tradeCooldownMinutes: Int = 15 // Aynı coinde 15 dakika bekleme süresi
+    val tradeCooldownMinutes: Int = 20, // Aynı coinde 20 dakika bekleme süresi
+    val targetExchangePackage: String = "com.getmidas.app",
+    val targetExchangeName: String = "Midas"
 )
 
 class CryptoTraderRepository(context: Context) {
@@ -176,7 +180,13 @@ class CryptoTraderRepository(context: Context) {
                         }
 
                         // 3. Strict Confluence: Must have real momentum lead + favorable technical setup
-                        val isTechnicalValid = tech != null && (tech.confluenceScore >= 70 || tech.isSupportBounceValid || tech.rsi14 <= 45.0)
+                        val isSniperMode = _traderSettings.value.isEveningSniperMode
+                        val isTechnicalValid = if (isSniperMode) {
+                            tech != null && (tech.rsi14 <= 42.0 || tech.isSupportBounceValid) && tech.confluenceScore >= 68
+                        } else {
+                            tech != null && (tech.confluenceScore >= 65 || tech.isSupportBounceValid || tech.rsi14 <= 48.0)
+                        }
+
                         val isSpreadValid = spread >= requiredSpread
 
                         isSpreadValid && isTechnicalValid && tradeDao.getOpenPositionForSymbol(asset.symbol) == null
@@ -188,7 +198,11 @@ class CryptoTraderRepository(context: Context) {
                         val tech = techMap[candidate.symbol]
 
                         val rationale = if (tech != null) {
-                            "5dk Destek: $${String.format(Locale.US, "%.2f", tech.supportLevel)} | RSI: ${String.format(Locale.US, "%.1f", tech.rsi14)} | Binance %+${String.format(Locale.US, "%.2f", candidate.leadLagDiffPercent)} önde (Skor: ${tech.confluenceScore}/100)"
+                            if (_traderSettings.value.isEveningSniperMode) {
+                                "🌙 Akşam Sniper Seansı: Dip Destek ($${String.format(Locale.US, "%.2f", tech.supportLevel)}) • RSI: ${String.format(Locale.US, "%.1f", tech.rsi14)} • Binance %+${String.format(Locale.US, "%.2f", candidate.leadLagDiffPercent)} Öncü"
+                            } else {
+                                "5dk Destek: $${String.format(Locale.US, "%.2f", tech.supportLevel)} | RSI: ${String.format(Locale.US, "%.1f", tech.rsi14)} | Binance %+${String.format(Locale.US, "%.2f", candidate.leadLagDiffPercent)} önde (Skor: ${tech.confluenceScore}/100)"
+                            }
                         } else {
                             "Binance Global %+${String.format(Locale.US, "%.2f", candidate.leadLagDiffPercent)} önde. Komisyon korumalı kâr hedefi."
                         }
@@ -251,10 +265,10 @@ class CryptoTraderRepository(context: Context) {
         com.example.util.NotificationHelper.cancelSignalNotification(appContext, signal.id)
         lastTradeTimestampMap[signal.symbol] = System.currentTimeMillis()
 
-        // 1. Automatically bring Midas app to the foreground
-        com.example.util.AppLauncherHelper.launchMidasApp(appContext)
+        // 1. Automatically bring configured target exchange app (e.g. Midas) to the foreground
+        com.example.util.AppLauncherHelper.launchTargetExchange(appContext, _traderSettings.value.targetExchangePackage)
 
-        // 2. Trigger automated Midas screen interaction (Auto-Click 'Al'/'Sat' & Auto-Fill amount)
+        // 2. Trigger automated screen interaction (Auto-Click 'Al'/'Sat' & Auto-Fill amount)
         com.example.service.CryptoAccessibilityService.executeMidasAssistOrder(
             actionType = signal.actionType,
             amount = signal.investmentAmount,

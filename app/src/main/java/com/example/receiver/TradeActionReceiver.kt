@@ -41,8 +41,9 @@ class TradeActionReceiver : BroadcastReceiver() {
                     }
                 }
 
-                // 1. Launch Midas App immediately
-                com.example.util.AppLauncherHelper.launchMidasApp(context)
+                // 1. Launch configured target exchange app
+                val targetPkg = repository.traderSettings.value.targetExchangePackage
+                com.example.util.AppLauncherHelper.launchTargetExchange(context, targetPkg)
 
                 // 2. Trigger Accessibility Assistant for Midas Order
                 CryptoAccessibilityService.executeMidasAssistOrder(actionType, investAmount, entryPrice)
