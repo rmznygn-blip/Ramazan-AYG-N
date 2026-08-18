@@ -20,14 +20,18 @@ jobs:
       with:
         java-version: '17'
         distribution: 'temurin'
-        cache: gradle
 
-    - name: Grant execute permission for gradlew (if present)
+    - name: Setup Android SDK
+      uses: android-actions/setup-android@v3
+
+    - name: Setup Gradle
+      uses: gradle/actions/setup-gradle@v4
+      with:
+        gradle-version: '8.7'
+
+    - name: Build Debug APK
       run: |
-        if [ -f gradlew ]; then chmod +x gradlew; fi
-
-    - name: Build Debug APK with Gradle
-      run: gradle :app:assembleDebug --no-daemon
+        gradle :app:assembleDebug --stacktrace --no-daemon -Dorg.gradle.jvmargs="-Xmx4g -Dfile.encoding=UTF-8 -Djava.awt.headless=true"
 
     - name: Upload APK Artifact
       uses: actions/upload-artifact@v4
