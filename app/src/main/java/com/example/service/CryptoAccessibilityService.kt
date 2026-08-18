@@ -133,6 +133,13 @@ class CryptoAccessibilityService : AccessibilityService() {
 
                     val orderSheetRoot = rootInActiveWindow
                     if (orderSheetRoot != null) {
+                        // Ensure USDT mode is selected on Midas if toggle exists
+                        findAndClickAnyNodeWithTexts(
+                            orderSheetRoot,
+                            listOf("USDT", "Tutar (USDT)", "Dolar (USDT)", "USDT ile Al")
+                        )
+                        delay(200L)
+
                         if (isSell) {
                             // On Midas Sell screen, prioritize clicking "%100" / "Tümü" / "Tümünü Sat"
                             val clickedPercent = findAndClickAnyNodeWithTexts(

@@ -77,13 +77,13 @@ object CommissionCalculator {
         )
     }
 
-    fun formatCurrency(value: Double, symbol: String = "$"): String {
+    fun formatCurrency(value: Double, symbol: String = "USDT"): String {
         return if (value >= 1000) {
-            String.format(Locale.US, "%s%,.2f", symbol, value)
+            String.format(Locale.US, "%,.2f %s", value, symbol)
         } else if (value >= 1) {
-            String.format(Locale.US, "%s%.2f", symbol, value)
+            String.format(Locale.US, "%.2f %s", value, symbol)
         } else {
-            String.format(Locale.US, "%s%.4f", symbol, value)
+            String.format(Locale.US, "%.4f %s", value, symbol)
         }
     }
 }
