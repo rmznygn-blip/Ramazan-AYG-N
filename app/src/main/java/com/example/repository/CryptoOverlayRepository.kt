@@ -15,6 +15,12 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
+import org.json.JSONArray
+import java.io.BufferedReader
+import java.io.InputStreamReader
+import java.net.HttpURLConnection
+import java.net.URL
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
@@ -24,22 +30,23 @@ object CryptoOverlayRepository {
 
     private val repositoryScope = CoroutineScope(Dispatchers.Default)
     private var simulationJob: Job? = null
+    private var livePriceJob: Job? = null
 
     private val defaultAssets = listOf(
         CryptoAsset(
             id = "SOL",
             symbol = "SOL",
             name = "Solana",
-            priceFormatted = "$184.60",
-            rawPrice = 184.60,
+            priceFormatted = "$78.40",
+            rawPrice = 78.40,
             currencySymbol = "$",
-            changePercent = 4.89,
-            changeFormatted = "+4.89%",
+            changePercent = 2.15,
+            changeFormatted = "+2.15%",
             isPositive = true,
             sparklinePoints = listOf(30f, 35f, 40f, 38f, 45f, 50f, 55f, 60f, 68f),
             sourceApp = "Midas Kripto",
-            binanceReferencePrice = 185.75,
-            leadLagDiffPercent = 0.62
+            binanceReferencePrice = 78.90,
+            leadLagDiffPercent = 0.64
         ),
         CryptoAsset(
             id = "BTC",
@@ -121,6 +128,96 @@ object CryptoOverlayRepository {
 
     init {
         updateOracleState(_cryptoAssets.value)
+        startLiveBinancePolling()
+    }
+
+    private fun startLiveBinancePolling() {
+        livePriceJob?.cancel()
+        livePriceJob = repositoryScope.launch(Dispatchers.IO) {
+            while (isActive) {
+                try {
+                    fetchRealBinancePrices()
+                } catch (e: Exception) {
+                    // Ignore network errors in background
+                }
+                delay(3000L) // Refresh every 3 seconds for live rates
+            }
+        }
+    }
+
+    private suspend fun fetchRealBinancePrices() = withContext(Dispatchers.IO) {
+        val symbolsToTrack = listOf("SOLUSDT", "BTCUSDT", "ETHUSDT", "AVAXUSDT", "XRPUSDT", "DOGEUSDT", "SUIUSDT")
+        val symbolsJson = symbolsToTrack.joinToString(prefix = "[", postfix = "]", separator = ",") { "\"$it\"" }
+        val urlStr = "https://api.binance.com/api/v3/ticker/24hr?symbols=$symbolsJson"
+
+        val url = URL(urlStr)
+        val conn = (url.openConnection() as HttpURLConnection).apply {
+            requestMethod = "GET"
+            connectTimeout = 4000
+            readTimeout = 4000
+            setRequestProperty("Accept", "application/json")
+        }
+
+        if (conn.responseCode == 200) {
+            val reader = BufferedReader(InputStreamReader(conn.inputStream))
+            val response = reader.readText()
+            reader.close()
+
+            val jsonArray = JSONArray(response)
+            val updatedList = _cryptoAssets.value.toMutableList()
+
+            for (i in 0 until jsonArray.length()) {
+                val item = jsonArray.getJSONObject(i)
+                val pair = item.getString("symbol")
+                val symbol = pair.removeSuffix("USDT")
+                val lastPrice = item.getDouble("lastPrice")
+                val priceChangePercent = item.getDouble("priceChangePercent")
+
+                val existingIdx = updatedList.indexOfFirst { it.symbol.equals(symbol, ignoreCase = true) }
+                if (existingIdx >= 0) {
+                    val existing = updatedList[existingIdx]
+                    // If user is not running simulation, update to real live price
+                    if (!_isSimulationActive.value) {
+                        val midasPrice = existing.rawPrice.takeIf { it > 0 && it != defaultAssets.find { d -> d.symbol == symbol }?.rawPrice } ?: (lastPrice * 0.994) // Default Midas is slightly lagging spot
+                        val spread = ((lastPrice - midasPrice) / midasPrice) * 100.0
+                        val prefix = if (priceChangePercent >= 0) "+" else ""
+
+                        updatedList[existingIdx] = existing.copy(
+                            rawPrice = lastPrice,
+                            priceFormatted = formatPrice(lastPrice, "$"),
+                            changePercent = priceChangePercent,
+                            changeFormatted = "$prefix${String.format(Locale.US, "%.2f", priceChangePercent)}%",
+                            isPositive = priceChangePercent >= 0,
+                            binanceReferencePrice = lastPrice,
+                            leadLagDiffPercent = spread,
+                            detectedAt = System.currentTimeMillis()
+                        )
+                    }
+                } else {
+                    val prefix = if (priceChangePercent >= 0) "+" else ""
+                    updatedList.add(
+                        CryptoAsset(
+                            id = symbol,
+                            symbol = symbol,
+                            name = symbol,
+                            priceFormatted = formatPrice(lastPrice, "$"),
+                            rawPrice = lastPrice,
+                            currencySymbol = "$",
+                            changePercent = priceChangePercent,
+                            changeFormatted = "$prefix${String.format(Locale.US, "%.2f", priceChangePercent)}%",
+                            isPositive = priceChangePercent >= 0,
+                            binanceReferencePrice = lastPrice,
+                            leadLagDiffPercent = 0.50,
+                            sourceApp = "Binance Canlı"
+                        )
+                    )
+                }
+            }
+
+            _cryptoAssets.value = updatedList
+            updateOracleState(updatedList)
+        }
+        conn.disconnect()
     }
 
     fun updateOverlayRunning(running: Boolean) {
