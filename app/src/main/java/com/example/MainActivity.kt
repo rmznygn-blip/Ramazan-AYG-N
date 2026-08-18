@@ -58,6 +58,7 @@ class MainActivity : ComponentActivity() {
 
     private val hasOverlayPermissionState = mutableStateOf(false)
     private val hasAccessibilityPermissionState = mutableStateOf(false)
+    private val hasBatteryOptimizationIgnoredState = mutableStateOf(false)
     private lateinit var traderRepository: CryptoTraderRepository
 
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -78,6 +79,7 @@ class MainActivity : ComponentActivity() {
             MyApplicationTheme {
                 val hasOverlayPermission by hasOverlayPermissionState
                 val hasAccessibilityPermission by hasAccessibilityPermissionState
+                val hasBatteryOptimizationIgnored by hasBatteryOptimizationIgnoredState
 
                 val isOverlayRunning by CryptoOverlayRepository.isOverlayRunning.collectAsState()
                 val isSimulationActive by CryptoOverlayRepository.isSimulationActive.collectAsState()
@@ -109,6 +111,7 @@ class MainActivity : ComponentActivity() {
                         modifier = Modifier.padding(innerPadding),
                         hasOverlayPermission = hasOverlayPermission,
                         hasAccessibilityPermission = hasAccessibilityPermission,
+                        hasBatteryOptimizationIgnored = hasBatteryOptimizationIgnored,
                         isOverlayRunning = isOverlayRunning,
                         isSimulationActive = isSimulationActive,
                         config = overlayConfig,
@@ -123,6 +126,7 @@ class MainActivity : ComponentActivity() {
                         settings = traderSettings,
                         onRequestOverlayPermission = { requestOverlayPermission() },
                         onRequestAccessibilityPermission = { requestAccessibilityPermission() },
+                        onRequestBatteryOptimization = { requestBatteryOptimizationExemption() },
                         onToggleOverlayService = { start ->
                             if (start) startFloatingService() else stopFloatingService()
                         },
@@ -173,7 +177,24 @@ class MainActivity : ComponentActivity() {
             CryptoAccessibilityService::class.java
         )
         hasAccessibilityPermissionState.value = isAccessEnabled
+        hasBatteryOptimizationIgnoredState.value = PermissionHelper.isBatteryOptimizationIgnored(this)
         CryptoOverlayRepository.updateAccessibilityConnected(isAccessEnabled)
+    }
+
+    private fun requestBatteryOptimizationExemption() {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+            try {
+                val intent = Intent(Settings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS).apply {
+                    data = Uri.parse("package:$packageName")
+                }
+                startActivity(intent)
+            } catch (e: Exception) {
+                try {
+                    val intent = Intent(Settings.ACTION_IGNORE_BATTERY_OPTIMIZATION_SETTINGS)
+                    startActivity(intent)
+                } catch (ignored: Exception) {}
+            }
+        }
     }
 
     private fun requestOverlayPermission() {
@@ -290,6 +311,7 @@ fun MidasTraderMainScreen(
     modifier: Modifier = Modifier,
     hasOverlayPermission: Boolean,
     hasAccessibilityPermission: Boolean,
+    hasBatteryOptimizationIgnored: Boolean,
     isOverlayRunning: Boolean,
     isSimulationActive: Boolean,
     config: OverlayConfig,
@@ -304,6 +326,7 @@ fun MidasTraderMainScreen(
     settings: TraderSettings,
     onRequestOverlayPermission: () -> Unit,
     onRequestAccessibilityPermission: () -> Unit,
+    onRequestBatteryOptimization: () -> Unit,
     onToggleOverlayService: (Boolean) -> Unit,
     onToggleSimulation: (Boolean) -> Unit,
     onUpdateConfig: (OverlayConfig) -> Unit,
@@ -352,11 +375,13 @@ fun MidasTraderMainScreen(
                 isOverlayRunning = isOverlayRunning,
                 hasOverlayPermission = hasOverlayPermission,
                 hasAccessibilityPermission = hasAccessibilityPermission,
+                hasBatteryOptimizationIgnored = hasBatteryOptimizationIgnored,
                 isSimulationActive = isSimulationActive,
                 onToggleService = onToggleOverlayService,
                 onToggleSimulation = onToggleSimulation,
                 onRequestOverlay = onRequestOverlayPermission,
-                onRequestAccessibility = onRequestAccessibilityPermission
+                onRequestAccessibility = onRequestAccessibilityPermission,
+                onRequestBatteryOptimization = onRequestBatteryOptimization
             )
         }
 
@@ -879,11 +904,13 @@ fun TraderMasterControlsCard(
     isOverlayRunning: Boolean,
     hasOverlayPermission: Boolean,
     hasAccessibilityPermission: Boolean,
+    hasBatteryOptimizationIgnored: Boolean,
     isSimulationActive: Boolean,
     onToggleService: (Boolean) -> Unit,
     onToggleSimulation: (Boolean) -> Unit,
     onRequestOverlay: () -> Unit,
-    onRequestAccessibility: () -> Unit
+    onRequestAccessibility: () -> Unit,
+    onRequestBatteryOptimization: () -> Unit
 ) {
     Surface(
         modifier = Modifier
@@ -936,10 +963,10 @@ fun TraderMasterControlsCard(
             // Permissions Quick Badges
             Row(
                 modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(8.dp)
+                horizontalArrangement = Arrangement.spacedBy(6.dp)
             ) {
                 QuickPermissionPill(
-                    title = "Overlay İzni",
+                    title = "Overlay",
                     isGranted = hasOverlayPermission,
                     onClick = onRequestOverlay,
                     modifier = Modifier.weight(1f)
@@ -948,6 +975,12 @@ fun TraderMasterControlsCard(
                     title = "Erişilebilirlik",
                     isGranted = hasAccessibilityPermission,
                     onClick = onRequestAccessibility,
+                    modifier = Modifier.weight(1.1f)
+                )
+                QuickPermissionPill(
+                    title = "Arka Plan",
+                    isGranted = hasBatteryOptimizationIgnored,
+                    onClick = onRequestBatteryOptimization,
                     modifier = Modifier.weight(1f)
                 )
             }

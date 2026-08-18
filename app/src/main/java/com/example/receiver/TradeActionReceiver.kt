@@ -42,17 +42,7 @@ class TradeActionReceiver : BroadcastReceiver() {
                 }
 
                 // 1. Launch Midas App immediately
-                val midasPackages = listOf("com.getmidas.app", "com.getmidas.crypto")
-                var launched = false
-                for (pkg in midasPackages) {
-                    val launchIntent = context.packageManager.getLaunchIntentForPackage(pkg)
-                    if (launchIntent != null) {
-                        launchIntent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_RESET_TASK_IF_NEEDED)
-                        context.startActivity(launchIntent)
-                        launched = true
-                        break
-                    }
-                }
+                com.example.util.AppLauncherHelper.launchMidasApp(context)
 
                 // 2. Trigger Accessibility Assistant for Midas Order
                 CryptoAccessibilityService.executeMidasAssistOrder(actionType, investAmount, entryPrice)

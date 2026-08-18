@@ -251,7 +251,10 @@ class CryptoTraderRepository(context: Context) {
         com.example.util.NotificationHelper.cancelSignalNotification(appContext, signal.id)
         lastTradeTimestampMap[signal.symbol] = System.currentTimeMillis()
 
-        // Trigger automated Midas screen interaction (Auto-Click 'Al'/'Sat' & Auto-Fill amount)
+        // 1. Automatically bring Midas app to the foreground
+        com.example.util.AppLauncherHelper.launchMidasApp(appContext)
+
+        // 2. Trigger automated Midas screen interaction (Auto-Click 'Al'/'Sat' & Auto-Fill amount)
         com.example.service.CryptoAccessibilityService.executeMidasAssistOrder(
             actionType = signal.actionType,
             amount = signal.investmentAmount,

@@ -29,6 +29,15 @@ object PermissionHelper {
         }
     }
 
+    fun isBatteryOptimizationIgnored(context: Context): Boolean {
+        return if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+            val pm = context.getSystemService(Context.POWER_SERVICE) as? android.os.PowerManager
+            pm?.isIgnoringBatteryOptimizations(context.packageName) == true
+        } else {
+            true
+        }
+    }
+
     fun isAccessibilityServiceEnabled(
         context: Context,
         serviceClass: Class<out AccessibilityService>
