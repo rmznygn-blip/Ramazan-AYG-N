@@ -17,8 +17,8 @@ android {
     applicationId = "com.aistudio.cryptooverlay.kxwqm"
     minSdk = 24
     targetSdk = 35
-    versionCode = 4
-    versionName = "1.3"
+    versionCode = 10
+    versionName = "2.0"
 
     testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
   }
