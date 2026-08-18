@@ -1,0 +1,6 @@
+{
+  "name": "Crypto Overlay",
+  "description": "OLED True Black Floating Overlay & Accessibility Service for Crypto Apps",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

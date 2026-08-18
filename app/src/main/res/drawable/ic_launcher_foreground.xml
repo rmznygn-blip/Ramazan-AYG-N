@@ -1,0 +1,50 @@
+<?xml version="1.0" encoding="utf-8"?>
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+    <group>
+        <!-- Floating HUD Outer Rounded Frame -->
+        <path
+            android:fillColor="#2200E676"
+            android:strokeColor="#00E676"
+            android:strokeWidth="2.5"
+            android:pathData="M 32,28 L 76,28 A 8,8 0 0,1 84,36 L 84,72 A 8,8 0 0,1 76,80 L 32,80 A 8,8 0 0,1 24,72 L 24,36 A 8,8 0 0,1 32,28 Z" />
+
+        <!-- Candlestick 1 (Bullish green) -->
+        <path
+            android:fillColor="#00E676"
+            android:pathData="M 37,44 L 43,44 L 43,62 L 37,62 Z" />
+        <path
+            android:strokeColor="#00E676"
+            android:strokeWidth="1.5"
+            android:pathData="M 40,38 L 40,68" />
+
+        <!-- Candlestick 2 (Bullish gold) -->
+        <path
+            android:fillColor="#FFD700"
+            android:pathData="M 51,38 L 57,38 L 57,56 L 51,56 Z" />
+        <path
+            android:strokeColor="#FFD700"
+            android:strokeWidth="1.5"
+            android:pathData="M 54,32 L 54,62" />
+
+        <!-- Candlestick 3 (Cyber cyan) -->
+        <path
+            android:fillColor="#00E5FF"
+            android:pathData="M 65,34 L 71,34 L 71,48 L 65,48 Z" />
+        <path
+            android:strokeColor="#00E5FF"
+            android:strokeWidth="1.5"
+            android:pathData="M 68,30 L 68,54" />
+
+        <!-- Trend Line -->
+        <path
+            android:strokeColor="#FFFFFF"
+            android:strokeWidth="2"
+            android:strokeLineCap="round"
+            android:strokeLineJoin="round"
+            android:pathData="M 30,64 L 42,50 L 54,44 L 78,34" />
+    </group>
+</vector>
