@@ -60,8 +60,14 @@ class CryptoAccessibilityService : AccessibilityService() {
     }
 
     fun triggerOrderAssist(actionType: String, amount: Double, price: Double) {
-        val targetButtonText = if (actionType.contains("SELL") || actionType.contains("PROFIT")) "Sat" else "Al"
-        val formattedAmount = if (amount % 1.0 == 0.0) "${amount.toInt()}" else String.format(Locale.US, "%.2f", amount)
+        val isSell = actionType.contains("SELL") || actionType.contains("PROFIT")
+        val targetButtonText = if (isSell) "Sat" else "Al"
+        // For buys: always use clean integer USDT (e.g. "12") so Midas keypad doesn't multiply by 1000!
+        val formattedAmount = if (!isSell) {
+            "${amount.toInt().coerceAtLeast(10)}"
+        } else {
+            if (price > 0) String.format(Locale.US, "%.4f", amount / price) else "${amount.toInt()}"
+        }
 
         // 1. Copy amount to clipboard for instant pasting fallback
         try {
@@ -78,17 +84,63 @@ class CryptoAccessibilityService : AccessibilityService() {
                 try { root.recycle() } catch (ignored: Exception) {}
 
                 if (buttonFound) {
-                    delay(600L) // Wait for order sheet/screen to animate in
+                    delay(700L) // Wait for order sheet/screen to animate in
 
-                    // Step 2: Look for amount input field and automatically fill the calculated amount
                     val orderSheetRoot = rootInActiveWindow
                     if (orderSheetRoot != null) {
-                        fillAmountInEditText(orderSheetRoot, formattedAmount)
+                        if (isSell) {
+                            // On Midas Sell screen, prioritize clicking "%100" / "Tümü" / "Tümünü Sat"
+                            val clickedPercent = findAndClickAnyNodeWithTexts(
+                                orderSheetRoot,
+                                listOf("%100", "100%", "Tümü", "Tümünü sat", "Tümünü Sat", "Maksimum", "Max")
+                            )
+                            if (!clickedPercent) {
+                                fillAmountInEditText(orderSheetRoot, formattedAmount)
+                            }
+                        } else {
+                            // On Midas Buy screen, fill clean integer USDT amount
+                            fillAmountInEditText(orderSheetRoot, formattedAmount)
+                        }
                         try { orderSheetRoot.recycle() } catch (ignored: Exception) {}
                     }
                 }
             }
         }
+    }
+
+    private fun findAndClickAnyNodeWithTexts(node: AccessibilityNodeInfo?, texts: List<String>): Boolean {
+        if (node == null) return false
+
+        val nodeText = node.text?.toString()?.trim() ?: ""
+        val contentDesc = node.contentDescription?.toString()?.trim() ?: ""
+
+        if (texts.any { nodeText.equals(it, ignoreCase = true) || contentDesc.equals(it, ignoreCase = true) }) {
+            if (node.isClickable) {
+                node.performAction(AccessibilityNodeInfo.ACTION_CLICK)
+                return true
+            } else {
+                var parent = node.parent
+                while (parent != null) {
+                    if (parent.isClickable) {
+                        parent.performAction(AccessibilityNodeInfo.ACTION_CLICK)
+                        try { parent.recycle() } catch (ignored: Exception) {}
+                        return true
+                    }
+                    val nextParent = parent.parent
+                    try { parent.recycle() } catch (ignored: Exception) {}
+                    parent = nextParent
+                }
+            }
+        }
+
+        for (i in 0 until node.childCount) {
+            val child = node.getChild(i)
+            val clicked = findAndClickAnyNodeWithTexts(child, texts)
+            try { child?.recycle() } catch (ignored: Exception) {}
+            if (clicked) return true
+        }
+
+        return false
     }
 
     private fun findAndClickNodeWithText(node: AccessibilityNodeInfo?, text: String): Boolean {

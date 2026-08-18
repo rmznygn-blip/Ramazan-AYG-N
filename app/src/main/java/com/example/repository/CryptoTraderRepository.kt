@@ -11,6 +11,7 @@ import com.example.model.BinanceOracleData
 import com.example.model.MidasAccountState
 import kotlinx.coroutines.*
 import kotlinx.coroutines.flow.*
+import java.util.Locale
 
 data class TraderSettings(
     val isAutoScanActive: Boolean = true,
@@ -37,6 +38,7 @@ class CryptoTraderRepository(context: Context) {
 
     val midasAccountState: StateFlow<MidasAccountState> = CryptoOverlayRepository.midasAccountState
     val binanceOracleMap: StateFlow<Map<String, BinanceOracleData>> = CryptoOverlayRepository.binanceOracleMap
+    val technicalAnalysisMap = CryptoOverlayRepository.technicalAnalysisMap
 
     private val _traderSettings = MutableStateFlow(TraderSettings())
     val traderSettings: StateFlow<TraderSettings> = _traderSettings.asStateFlow()
@@ -130,34 +132,54 @@ class CryptoTraderRepository(context: Context) {
                     }
                 }
 
-                // 2. Oracle & Lead-Lag Analysis for Midas Micro-Scalp Entry
+                // 2. Oracle & 5-Minute Technical Support & Lead-Lag Analysis for Midas Micro-Scalp Entry
                 if (_pendingSignal.value == null && _traderSettings.value.isAutoScanActive && currentCash >= 10.0) {
+                    val techMap = technicalAnalysisMap.value
+
                     val candidate = currentAssets.firstOrNull { asset ->
+                        if (asset.symbol.equals("USDT", ignoreCase = true)) return@firstOrNull false
+
                         val oracle = oracleMap[asset.symbol]
                         val spread = oracle?.leadLagSpreadPercent ?: 0.0
+                        val tech = techMap[asset.symbol]
+
+                        // Overbought risk check: Never buy if 5m candle is overbought
+                        if (tech != null && tech.isOverboughtRisk) {
+                            return@firstOrNull false
+                        }
+
                         // Check if self-learning metric provides optimal adaptive threshold
                         val learnedMetric = tradeDao.getMetricForKey("${asset.symbol}_Midas Kripto")
                         val requiredSpread = if (learnedMetric != null && learnedMetric.confidenceMultiplier > 1.0) {
-                            (_traderSettings.value.minBinanceLeadSpread / learnedMetric.confidenceMultiplier).coerceAtLeast(0.25)
+                            (_traderSettings.value.minBinanceLeadSpread / learnedMetric.confidenceMultiplier).coerceAtLeast(0.20)
                         } else {
                             _traderSettings.value.minBinanceLeadSpread
                         }
 
-                        // Binance leads Midas by >= threshold and no open position
-                        spread >= requiredSpread && tradeDao.getOpenPositionForSymbol(asset.symbol) == null
+                        // Criteria: Binance Lead + 5m Technical Confluence (or default valid spread if technical data still loading)
+                        val isTechnicalValid = tech == null || tech.confluenceScore >= 65 || tech.isSupportBounceValid || tech.rsi14 <= 55.0
+                        val isSpreadValid = spread >= requiredSpread
+
+                        isSpreadValid && isTechnicalValid && tradeDao.getOpenPositionForSymbol(asset.symbol) == null
                     }
 
                     if (candidate != null) {
-                        // Allocate percentage of current cash (e.g. 25% of $50 = $12.50)
-                        val allocated = currentCash * (_traderSettings.value.cashAllocationPercent / 100.0)
-                        val tradeAmount = allocated.coerceIn(10.0, currentCash)
+                        // Allocate clean whole dollar amount of current cash (e.g. 25% of $49 = $12 USDT)
+                        val allocated = (currentCash * (_traderSettings.value.cashAllocationPercent / 100.0)).toInt().coerceIn(10, currentCash.toInt()).toDouble()
+                        val tech = techMap[candidate.symbol]
+
+                        val rationale = if (tech != null) {
+                            "5dk Destek: $${String.format(Locale.US, "%.2f", tech.supportLevel)} | RSI: ${String.format(Locale.US, "%.1f", tech.rsi14)} | Binance %+${String.format(Locale.US, "%.2f", candidate.leadLagDiffPercent)} önde (Skor: ${tech.confluenceScore}/100)"
+                        } else {
+                            "Binance Global %+${String.format(Locale.US, "%.2f", candidate.leadLagDiffPercent)} önde gidiyor. Midas gecikmeli fiyatından mikro kâr alımı."
+                        }
 
                         val signal = generateMidasOrderSignal(
                             symbol = candidate.symbol,
                             currentPrice = candidate.rawPrice,
-                            investedAmount = tradeAmount,
+                            investedAmount = allocated,
                             targetNetProfitPercent = _traderSettings.value.targetNetProfitPercent / 100.0,
-                            rationale = "Binance Global %+${String.format("%.2f", candidate.leadLagDiffPercent)} önde gidiyor. Midas gecikmeli fiyatından garantili mikro kâr alımı."
+                            rationale = rationale
                         )
                         tradeDao.insertSignal(signal)
                     }
@@ -307,6 +329,14 @@ class CryptoTraderRepository(context: Context) {
                 rationale = "Binance Oracle onaylı Midas Mikro Alış Emri."
             )
             tradeDao.insertSignal(signal)
+        }
+    }
+
+    fun clearAllData() {
+        repositoryScope.launch {
+            tradeDao.clearAllPositions()
+            tradeDao.clearAllSignals()
+            tradeDao.clearAllMetrics()
         }
     }
 

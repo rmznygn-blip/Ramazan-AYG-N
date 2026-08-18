@@ -125,4 +125,13 @@ interface TradeDao {
 
     @Query("SELECT * FROM learning_metrics ORDER BY totalNetProfitRealized DESC")
     fun getAllMetrics(): Flow<List<LearningMetricEntity>>
+
+    @Query("DELETE FROM dca_positions")
+    suspend fun clearAllPositions()
+
+    @Query("DELETE FROM trade_signals")
+    suspend fun clearAllSignals()
+
+    @Query("DELETE FROM learning_metrics")
+    suspend fun clearAllMetrics()
 }

@@ -79,6 +79,7 @@ class MainActivity : ComponentActivity() {
 
                 val midasAccount by traderRepository.midasAccountState.collectAsState()
                 val binanceOracleMap by traderRepository.binanceOracleMap.collectAsState()
+                val technicalAnalysisMap by traderRepository.technicalAnalysisMap.collectAsState()
                 val pendingSignal by traderRepository.pendingSignal.collectAsState()
                 val openPositions by traderRepository.openPositions.collectAsState(initial = emptyList())
                 val learningMetrics by traderRepository.learningMetrics.collectAsState(initial = emptyList())
@@ -107,6 +108,7 @@ class MainActivity : ComponentActivity() {
                         screenLogs = screenLogs,
                         midasAccount = midasAccount,
                         binanceOracleMap = binanceOracleMap,
+                        technicalAnalysisMap = technicalAnalysisMap,
                         pendingSignal = pendingSignal,
                         openPositions = openPositions,
                         learningMetrics = learningMetrics,
@@ -140,6 +142,10 @@ class MainActivity : ComponentActivity() {
                         onManualSetCash = { cash ->
                             CryptoOverlayRepository.updateMidasCash(cash, fromScreen = false)
                             Toast.makeText(this, "Nakit güncellendi: $$cash", Toast.LENGTH_SHORT).show()
+                        },
+                        onClearData = {
+                            traderRepository.clearAllData()
+                            Toast.makeText(this, "Tüm test pozisyonları ve veriler sıfırlandı!", Toast.LENGTH_SHORT).show()
                         }
                     )
                 }
@@ -283,6 +289,7 @@ fun MidasTraderMainScreen(
     screenLogs: List<ScreenReaderLog>,
     midasAccount: MidasAccountState,
     binanceOracleMap: Map<String, BinanceOracleData>,
+    technicalAnalysisMap: Map<String, com.example.model.TechnicalAnalysis5m>,
     pendingSignal: TradeSignalEntity?,
     openPositions: List<DcaPositionEntity>,
     learningMetrics: List<LearningMetricEntity>,
@@ -296,7 +303,8 @@ fun MidasTraderMainScreen(
     onRejectSignal: (TradeSignalEntity) -> Unit,
     onTriggerManualSignal: (String) -> Unit,
     onUpdateSettings: (TraderSettings) -> Unit,
-    onManualSetCash: (Double) -> Unit
+    onManualSetCash: (Double) -> Unit,
+    onClearData: () -> Unit
 ) {
     var selectedTab by remember { mutableIntStateOf(0) }
 
@@ -344,7 +352,7 @@ fun MidasTraderMainScreen(
             )
         }
 
-        // 4. TAB SELECTOR (5 TABS)
+        // 4. TAB SELECTOR (6 TABS)
         item {
             Row(
                 modifier = Modifier
@@ -359,36 +367,43 @@ fun MidasTraderMainScreen(
                     title = "HUD",
                     icon = Icons.Default.Visibility,
                     selected = selectedTab == 0,
-                    modifier = Modifier.weight(1f),
+                    modifier = Modifier.weight(0.9f),
                     onClick = { selectedTab = 0 }
+                )
+                MainTabButton(
+                    title = "5Dk Mum",
+                    icon = Icons.Default.ShowChart,
+                    selected = selectedTab == 1,
+                    modifier = Modifier.weight(1.2f),
+                    onClick = { selectedTab = 1 }
                 )
                 MainTabButton(
                     title = "DCA (${openPositions.size})",
                     icon = Icons.Default.AccountTree,
-                    selected = selectedTab == 1,
-                    modifier = Modifier.weight(1.1f),
-                    onClick = { selectedTab = 1 }
-                )
-                MainTabButton(
-                    title = "AI Öğrenme",
-                    icon = Icons.Default.Psychology,
                     selected = selectedTab == 2,
-                    modifier = Modifier.weight(1.2f),
+                    modifier = Modifier.weight(1.1f),
                     onClick = { selectedTab = 2 }
                 )
                 MainTabButton(
-                    title = "Rapor Odası",
-                    icon = Icons.Default.Analytics,
+                    title = "AI",
+                    icon = Icons.Default.Psychology,
                     selected = selectedTab == 3,
-                    modifier = Modifier.weight(1.3f),
+                    modifier = Modifier.weight(0.8f),
                     onClick = { selectedTab = 3 }
                 )
                 MainTabButton(
-                    title = "Ayarlar",
-                    icon = Icons.Default.Tune,
+                    title = "Rapor",
+                    icon = Icons.Default.Analytics,
                     selected = selectedTab == 4,
-                    modifier = Modifier.weight(1f),
+                    modifier = Modifier.weight(0.9f),
                     onClick = { selectedTab = 4 }
+                )
+                MainTabButton(
+                    title = "Ayar",
+                    icon = Icons.Default.Tune,
+                    selected = selectedTab == 5,
+                    modifier = Modifier.weight(0.8f),
+                    onClick = { selectedTab = 5 }
                 )
             }
         }
@@ -410,18 +425,27 @@ fun MidasTraderMainScreen(
             }
             1 -> {
                 item {
-                    MidasDcaPositionMatrixSection(
-                        openPositions = openPositions,
-                        onTriggerManual = onTriggerManualSignal
+                    TechnicalAnalysis5mSection(
+                        technicalMap = technicalAnalysisMap,
+                        assets = assets
                     )
                 }
             }
             2 -> {
                 item {
-                    SelfLearningSection(learningMetrics = learningMetrics)
+                    MidasDcaPositionMatrixSection(
+                        openPositions = openPositions,
+                        onTriggerManual = onTriggerManualSignal,
+                        onClearData = onClearData
+                    )
                 }
             }
             3 -> {
+                item {
+                    SelfLearningSection(learningMetrics = learningMetrics)
+                }
+            }
+            4 -> {
                 item {
                     DiagnosticsAndReportRoomSection(
                         midasAccount = midasAccount,
@@ -434,7 +458,7 @@ fun MidasTraderMainScreen(
                     )
                 }
             }
-            4 -> {
+            5 -> {
                 item {
                     MidasTraderSettingsSection(
                         settings = settings,
@@ -1042,7 +1066,8 @@ fun MainTabButton(
 @Composable
 fun MidasDcaPositionMatrixSection(
     openPositions: List<DcaPositionEntity>,
-    onTriggerManual: (String) -> Unit
+    onTriggerManual: (String) -> Unit,
+    onClearData: () -> Unit
 ) {
     Surface(
         modifier = Modifier
@@ -1073,18 +1098,30 @@ fun MidasDcaPositionMatrixSection(
                     )
                 }
 
-                Surface(
-                    color = CyberEmerald.copy(alpha = 0.15f),
-                    shape = RoundedCornerShape(8.dp)
-                ) {
-                    Text(
-                        text = "${openPositions.size} Açık",
-                        color = CyberEmerald,
-                        fontSize = 11.sp,
-                        fontWeight = FontWeight.Bold,
-                        fontFamily = FontFamily.Monospace,
-                        modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
-                    )
+                Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                    Button(
+                        onClick = onClearData,
+                        colors = ButtonDefaults.buttonColors(containerColor = CyberCrimson.copy(alpha = 0.2f), contentColor = CyberCrimson),
+                        shape = RoundedCornerShape(8.dp),
+                        contentPadding = PaddingValues(horizontal = 8.dp, vertical = 2.dp),
+                        modifier = Modifier.height(28.dp)
+                    ) {
+                        Text("Verileri Sıfırla", fontSize = 10.sp, fontWeight = FontWeight.Bold)
+                    }
+
+                    Surface(
+                        color = CyberEmerald.copy(alpha = 0.15f),
+                        shape = RoundedCornerShape(8.dp)
+                    ) {
+                        Text(
+                            text = "${openPositions.size} Açık",
+                            color = CyberEmerald,
+                            fontSize = 11.sp,
+                            fontWeight = FontWeight.Bold,
+                            fontFamily = FontFamily.Monospace,
+                            modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
+                        )
+                    }
                 }
             }
 
@@ -1714,6 +1751,270 @@ fun LiveMidasPreviewCard(
                     onDragDelta = { _, _ -> },
                     onClose = {}
                 )
+            }
+        }
+    }
+}
+
+@Composable
+fun TechnicalAnalysis5mSection(
+    technicalMap: Map<String, com.example.model.TechnicalAnalysis5m>,
+    assets: List<CryptoAsset>
+) {
+    Surface(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(16.dp))
+            .border(1.dp, OledCardBorder, RoundedCornerShape(16.dp)),
+        color = OledSurface
+    ) {
+        Column(modifier = Modifier.padding(16.dp)) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Column {
+                    Text(
+                        text = "5 DAKİKALIK TEKNİK DESTEK & MUM ANALİZİ",
+                        color = TextSecondary,
+                        fontSize = 11.sp,
+                        fontWeight = FontWeight.Bold,
+                        fontFamily = FontFamily.Monospace
+                    )
+                    Text(
+                        text = "🏛️ Kurumsal Kantitatif Scalp Algoritması",
+                        color = CyberCyan,
+                        fontSize = 12.sp,
+                        fontWeight = FontWeight.SemiBold
+                    )
+                }
+
+                Surface(
+                    color = CyberCyan.copy(alpha = 0.15f),
+                    shape = RoundedCornerShape(8.dp)
+                ) {
+                    Text(
+                        text = "5m Klines",
+                        color = CyberCyan,
+                        fontSize = 10.sp,
+                        fontWeight = FontWeight.Bold,
+                        fontFamily = FontFamily.Monospace,
+                        modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
+                    )
+                }
+            }
+
+            Spacer(modifier = Modifier.height(10.dp))
+
+            Surface(
+                color = Color(0xFF04070C),
+                shape = RoundedCornerShape(8.dp),
+                border = androidx.compose.foundation.BorderStroke(0.6.dp, OledCardBorder)
+            ) {
+                Row(
+                    modifier = Modifier.padding(10.dp),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Text("💡", fontSize = 16.sp)
+                    Text(
+                        text = "Bot, sadece 5 dakikalık mumda teknik desteğe (S/R) temas eden, RSI aşırı satım bölgesinde olan ve Binance'ın önde gittiği anlarda emir üretir. Dirençte veya tepe fiyatlarda alım kesinlikle filtrelenir.",
+                        color = TextTertiary,
+                        fontSize = 10.sp,
+                        lineHeight = 14.sp,
+                        fontFamily = FontFamily.Monospace
+                    )
+                }
+            }
+
+            Spacer(modifier = Modifier.height(14.dp))
+
+            val symbolsToShow = listOf("SOL", "BTC", "ETH", "AVAX")
+
+            symbolsToShow.forEach { symbol ->
+                val analysis = technicalMap[symbol]
+                val asset = assets.firstOrNull { it.symbol == symbol }
+                val price = asset?.rawPrice ?: analysis?.currentPrice ?: 0.0
+
+                Surface(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(vertical = 5.dp),
+                    color = Color(0xFF070B11),
+                    shape = RoundedCornerShape(12.dp),
+                    border = androidx.compose.foundation.BorderStroke(
+                        1.dp,
+                        if ((analysis?.confluenceScore ?: 0) >= 70) CyberEmerald.copy(alpha = 0.5f) else OledCardBorder
+                    )
+                ) {
+                    Column(modifier = Modifier.padding(12.dp)) {
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                                Text(
+                                    text = symbol,
+                                    color = Color.White,
+                                    fontSize = 14.sp,
+                                    fontWeight = FontWeight.Black,
+                                    fontFamily = FontFamily.Monospace
+                                )
+                                Text(
+                                    text = "$${String.format(Locale.US, "%.2f", price)}",
+                                    color = CyberEmerald,
+                                    fontSize = 13.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    fontFamily = FontFamily.Monospace
+                                )
+                            }
+
+                            val score = analysis?.confluenceScore ?: 50
+                            val scoreColor = when {
+                                score >= 75 -> CyberEmerald
+                                score >= 60 -> CyberCyan
+                                else -> TextTertiary
+                            }
+
+                            Surface(
+                                color = scoreColor.copy(alpha = 0.15f),
+                                shape = RoundedCornerShape(8.dp),
+                                border = androidx.compose.foundation.BorderStroke(0.8.dp, scoreColor.copy(alpha = 0.5f))
+                            ) {
+                                Text(
+                                    text = "Kalite Skoru: %$score",
+                                    color = scoreColor,
+                                    fontSize = 10.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    fontFamily = FontFamily.Monospace,
+                                    modifier = Modifier.padding(horizontal = 8.dp, vertical = 3.dp)
+                                )
+                            }
+                        }
+
+                        Spacer(modifier = Modifier.height(8.dp))
+
+                        val recText = analysis?.recommendation ?: "5Dk Veri Hesaplanıyor..."
+                        val recBg = if (analysis?.isSupportBounceValid == true || (analysis?.confluenceScore ?: 0) >= 70) {
+                            CyberEmerald.copy(alpha = 0.12f)
+                        } else if (analysis?.isOverboughtRisk == true) {
+                            CyberCrimson.copy(alpha = 0.12f)
+                        } else {
+                            Color(0xFF0F1722)
+                        }
+                        val recColor = if (analysis?.isSupportBounceValid == true || (analysis?.confluenceScore ?: 0) >= 70) {
+                            CyberEmerald
+                        } else if (analysis?.isOverboughtRisk == true) {
+                            CyberCrimson
+                        } else {
+                            TextSecondary
+                        }
+
+                        Surface(
+                            modifier = Modifier.fillMaxWidth(),
+                            color = recBg,
+                            shape = RoundedCornerShape(6.dp)
+                        ) {
+                            Text(
+                                text = recText,
+                                color = recColor,
+                                fontSize = 10.5.sp,
+                                fontWeight = FontWeight.Bold,
+                                fontFamily = FontFamily.Monospace,
+                                modifier = Modifier.padding(horizontal = 8.dp, vertical = 5.dp)
+                            )
+                        }
+
+                        Spacer(modifier = Modifier.height(10.dp))
+
+                        if (analysis != null) {
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.SpaceBetween
+                            ) {
+                                Column(modifier = Modifier.weight(1f)) {
+                                    Text(text = "5Dk Destek (S):", color = TextTertiary, fontSize = 9.sp, fontFamily = FontFamily.Monospace)
+                                    Text(
+                                        text = "$${String.format(Locale.US, "%.2f", analysis.supportLevel)} (-%${String.format(Locale.US, "%.2f", analysis.distanceToSupportPercent)})",
+                                        color = CyberEmerald,
+                                        fontSize = 11.sp,
+                                        fontWeight = FontWeight.Bold,
+                                        fontFamily = FontFamily.Monospace
+                                    )
+                                }
+
+                                Column(modifier = Modifier.weight(1f), horizontalAlignment = Alignment.End) {
+                                    Text(text = "5Dk Direnç (R):", color = TextTertiary, fontSize = 9.sp, fontFamily = FontFamily.Monospace)
+                                    Text(
+                                        text = "$${String.format(Locale.US, "%.2f", analysis.resistanceLevel)}",
+                                        color = CyberCrimson,
+                                        fontSize = 11.sp,
+                                        fontWeight = FontWeight.Bold,
+                                        fontFamily = FontFamily.Monospace
+                                    )
+                                }
+                            }
+
+                            Spacer(modifier = Modifier.height(6.dp))
+
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.SpaceBetween
+                            ) {
+                                Column(modifier = Modifier.weight(1f)) {
+                                    val rsiVal = analysis.rsi14
+                                    val rsiColor = when {
+                                        rsiVal <= 42.0 -> CyberEmerald
+                                        rsiVal >= 65.0 -> CyberCrimson
+                                        else -> CyberCyan
+                                    }
+                                    Text(text = "RSI (14 - 5m):", color = TextTertiary, fontSize = 9.sp, fontFamily = FontFamily.Monospace)
+                                    Text(
+                                        text = "${String.format(Locale.US, "%.1f", rsiVal)} ${if (rsiVal <= 42) "(Aşırı Satım 🟢)" else if (rsiVal >= 65) "(Aşırı Alım 🔴)" else ""}",
+                                        color = rsiColor,
+                                        fontSize = 11.sp,
+                                        fontWeight = FontWeight.Bold,
+                                        fontFamily = FontFamily.Monospace
+                                    )
+                                }
+
+                                Column(modifier = Modifier.weight(1f), horizontalAlignment = Alignment.End) {
+                                    Text(text = "Mum Formasyonu:", color = TextTertiary, fontSize = 9.sp, fontFamily = FontFamily.Monospace)
+                                    Text(
+                                        text = analysis.candlePattern,
+                                        color = Color.White,
+                                        fontSize = 10.sp,
+                                        fontWeight = FontWeight.SemiBold,
+                                        fontFamily = FontFamily.Monospace
+                                    )
+                                }
+                            }
+
+                            Spacer(modifier = Modifier.height(6.dp))
+
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.SpaceBetween
+                            ) {
+                                Text(
+                                    text = "EMA: 9 ($${String.format(Locale.US, "%.1f", analysis.ema9)}) / 21 ($${String.format(Locale.US, "%.1f", analysis.ema21)})",
+                                    color = TextTertiary,
+                                    fontSize = 9.5.sp,
+                                    fontFamily = FontFamily.Monospace
+                                )
+                                Text(
+                                    text = "Hacim: ${String.format(Locale.US, "%.2f", analysis.volumeRatioToAvg)}x",
+                                    color = if (analysis.volumeRatioToAvg >= 1.2) CyberEmerald else TextTertiary,
+                                    fontSize = 9.5.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    fontFamily = FontFamily.Monospace
+                                )
+                            }
+                        }
+                    }
+                }
             }
         }
     }

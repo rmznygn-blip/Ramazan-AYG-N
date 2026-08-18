@@ -549,6 +549,17 @@ fun FloatingOverlayContent(
                                     }
                                 }
 
+                                if (pendingSignal.rationale.isNotBlank()) {
+                                    Spacer(modifier = Modifier.height(4.dp))
+                                    Text(
+                                        text = "📊 ${pendingSignal.rationale}",
+                                        color = CyberCyan,
+                                        fontSize = 8.5.sp,
+                                        lineHeight = 11.sp,
+                                        fontFamily = FontFamily.Monospace
+                                    )
+                                }
+
                                 Spacer(modifier = Modifier.height(8.dp))
 
                                 // CONFIRM / REJECT BUTTONS

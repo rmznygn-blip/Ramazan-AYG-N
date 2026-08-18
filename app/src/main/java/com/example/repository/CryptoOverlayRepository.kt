@@ -111,6 +111,9 @@ object CryptoOverlayRepository {
     private val _binanceOracleMap = MutableStateFlow<Map<String, BinanceOracleData>>(emptyMap())
     val binanceOracleMap: StateFlow<Map<String, BinanceOracleData>> = _binanceOracleMap.asStateFlow()
 
+    private val _technicalAnalysisMap = MutableStateFlow<Map<String, com.example.model.TechnicalAnalysis5m>>(emptyMap())
+    val technicalAnalysisMap: StateFlow<Map<String, com.example.model.TechnicalAnalysis5m>> = _technicalAnalysisMap.asStateFlow()
+
     private val _overlayConfig = MutableStateFlow(OverlayConfig())
     val overlayConfig: StateFlow<OverlayConfig> = _overlayConfig.asStateFlow()
 
@@ -216,8 +219,67 @@ object CryptoOverlayRepository {
 
             _cryptoAssets.value = updatedList
             updateOracleState(updatedList)
+
+            // Also fetch institutional 5m Kline data for primary coins (SOL, BTC, ETH, AVAX)
+            fetch5mKlinesForSymbols(listOf("SOLUSDT", "BTCUSDT", "ETHUSDT", "AVAXUSDT"))
         }
         conn.disconnect()
+    }
+
+    private suspend fun fetch5mKlinesForSymbols(pairs: List<String>) = withContext(Dispatchers.IO) {
+        val analysisResults = _technicalAnalysisMap.value.toMutableMap()
+
+        for (pair in pairs) {
+            try {
+                val symbol = pair.removeSuffix("USDT")
+                val klineUrl = URL("https://api.binance.com/api/v3/klines?symbol=$pair&interval=5m&limit=30")
+                val conn = (klineUrl.openConnection() as HttpURLConnection).apply {
+                    requestMethod = "GET"
+                    connectTimeout = 3000
+                    readTimeout = 3000
+                    setRequestProperty("Accept", "application/json")
+                }
+
+                if (conn.responseCode == 200) {
+                    val reader = BufferedReader(InputStreamReader(conn.inputStream))
+                    val body = reader.readText()
+                    reader.close()
+
+                    val rawArray = JSONArray(body)
+                    val candleList = mutableListOf<com.example.model.CandleStick>()
+
+                    for (i in 0 until rawArray.length()) {
+                        val c = rawArray.getJSONArray(i)
+                        candleList.add(
+                            com.example.model.CandleStick(
+                                openTime = c.getLong(0),
+                                open = c.getString(1).toDouble(),
+                                high = c.getString(2).toDouble(),
+                                low = c.getString(3).toDouble(),
+                                close = c.getString(4).toDouble(),
+                                volume = c.getString(5).toDouble(),
+                                closeTime = c.getLong(6)
+                            )
+                        )
+                    }
+
+                    val oracle = _binanceOracleMap.value[symbol]
+                    val spread = oracle?.leadLagSpreadPercent ?: 0.0
+
+                    val analysis = com.example.engine.TechnicalAnalysisEngine.analyze5mCandles(
+                        symbol = symbol,
+                        candles = candleList,
+                        leadLagSpreadPercent = spread
+                    )
+                    analysisResults[symbol] = analysis
+                }
+                conn.disconnect()
+            } catch (e: Exception) {
+                // Ignore individual symbol network errors
+            }
+        }
+
+        _technicalAnalysisMap.value = analysisResults
     }
 
     fun updateOverlayRunning(running: Boolean) {
