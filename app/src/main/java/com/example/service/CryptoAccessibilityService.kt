@@ -31,9 +31,54 @@ class CryptoAccessibilityService : AccessibilityService() {
             "SOL", "BTC", "ETH", "AVAX", "XRP", "DOGE", "USDT", "ADA",
             "DOT", "LINK", "NEAR", "PEPE", "SHIB", "TRX", "SUI", "ARB", "RENDER", "BNB"
         )
-        private val PRICE_PATTERN = Pattern.compile("([$₺€])?\\s*([0-9]{1,3}(?:,[0-9]{3})*(?:\\.[0-9]{1,4})?|[0-9]+(?:\\.[0-9]{1,4})?)")
-        private val PERCENT_PATTERN = Pattern.compile("([+-]?\\s*[0-9]+(?:\\.[0-9]{1,2})?)\\s*%")
-        private val CASH_KEYWORDS = listOf("kullanılabilir", "nakit", "alım gücü", "bakiye", "available", "cash", "cüzdan")
+        private val CASH_KEYWORDS = listOf("kullanılabilir", "nakit", "alım gücü", "bakiye", "available", "cash", "cüzdan", "usdt")
+
+        fun parseMidasNumber(raw: String): Double? {
+            if (raw.isBlank() || raw.contains("%")) return null
+            val clean = raw.replace("$", "")
+                .replace("₺", "")
+                .replace("€", "")
+                .replace("~", "")
+                .replace("USDT", "")
+                .replace("USD", "")
+                .trim()
+
+            val regex = Regex("""[0-9]+(?:[.,][0-9]+)*""")
+            val match = regex.find(clean)?.value ?: return null
+
+            return try {
+                if (match.contains(",") && match.contains(".")) {
+                    val lastComma = match.lastIndexOf(',')
+                    val lastDot = match.lastIndexOf('.')
+                    if (lastComma > lastDot) {
+                        match.replace(".", "").replace(",", ".").toDoubleOrNull()
+                    } else {
+                        match.replace(",", "").toDoubleOrNull()
+                    }
+                } else if (match.contains(",")) {
+                    val parts = match.split(",")
+                    if (parts.size == 2 && parts[1].length <= 4) {
+                        "${parts[0]}.${parts[1]}".toDoubleOrNull()
+                    } else {
+                        match.replace(",", "").toDoubleOrNull()
+                    }
+                } else {
+                    match.toDoubleOrNull()
+                }
+            } catch (e: Exception) {
+                null
+            }
+        }
+
+        fun parseMidasPercentage(raw: String): Double? {
+            if (!raw.contains("%")) return null
+            val isNegative = raw.contains("-")
+            val clean = raw.replace("%", "").replace("+", "").replace("-", "").replace("(", "").replace(")", "").trim()
+            val regex = Regex("""[0-9]+(?:[.,][0-9]+)*""")
+            val match = regex.find(clean)?.value ?: return null
+            val num = parseMidasNumber(match) ?: return null
+            return if (isNegative) -num else num
+        }
 
         fun executeMidasAssistOrder(actionType: String, amount: Double, price: Double = 0.0) {
             instance?.triggerOrderAssist(actionType, amount, price)
@@ -250,33 +295,42 @@ class CryptoAccessibilityService : AccessibilityService() {
         val combinedText = texts.joinToString(" | ")
         var detectedCash: Double? = null
 
-        // 1. Detect Midas Cash / Available Balance
+        // 1. Detect Midas Cash / Available Balance (USDT priority)
+        var foundUsdtCash: Double? = null
         for (i in texts.indices) {
             val lower = texts[i].lowercase(Locale.ROOT)
+            val isUsdt = lower == "usdt" || lower.startsWith("usdt ") || lower.contains("usdt")
             val isCashLabel = CASH_KEYWORDS.any { lower.contains(it) }
 
-            if (isCashLabel) {
-                // Look adjacent 3 items for currency numbers
+            if (isUsdt) {
+                val lookahead = (i..minOf(i + 4, texts.lastIndex))
+                for (k in lookahead) {
+                    val candidate = texts[k]
+                    val parsed = parseMidasNumber(candidate)
+                    if (parsed != null && parsed > 0 && !candidate.contains("%") && !candidate.contains("APY", ignoreCase = true)) {
+                        foundUsdtCash = parsed
+                        break
+                    }
+                }
+            } else if (isCashLabel && detectedCash == null) {
                 val lookahead = (i..minOf(i + 3, texts.lastIndex))
                 for (k in lookahead) {
                     val candidate = texts[k]
-                    val priceMatcher = PRICE_PATTERN.matcher(candidate)
-                    if (priceMatcher.find() && !candidate.contains("%")) {
-                        val numberStr = priceMatcher.group(2)?.replace(",", "") ?: "0"
-                        val parsed = numberStr.toDoubleOrNull() ?: 0.0
-                        if (parsed > 0) {
-                            detectedCash = parsed
-                            break
-                        }
+                    val parsed = parseMidasNumber(candidate)
+                    if (parsed != null && parsed > 0 && !candidate.contains("%")) {
+                        detectedCash = parsed
+                        break
                     }
                 }
             }
         }
 
+        val effectiveCash = foundUsdtCash ?: detectedCash
+
         // 2. Detect Crypto Assets & Prices
         for (i in texts.indices) {
             val token = texts[i].uppercase(Locale.US)
-            val matchedSymbol = KNOWN_SYMBOLS.firstOrNull { token == it || token.startsWith("$it/") || token.startsWith("$it ") }
+            val matchedSymbol = KNOWN_SYMBOLS.firstOrNull { token == it || token.startsWith("$it/") || token.startsWith("$it ") || token.startsWith("$it·") }
 
             if (matchedSymbol != null && !detectedSymbols.contains(matchedSymbol)) {
                 detectedSymbols.add(matchedSymbol)
@@ -288,16 +342,14 @@ class CryptoAccessibilityService : AccessibilityService() {
                 var changePercent = 0.0
                 var isPositive = true
 
-                // Look at next 5 tokens
-                val lookaheadRange = (i + 1..minOf(i + 5, texts.lastIndex))
+                // Look at next 6 tokens
+                val lookaheadRange = (i + 1..minOf(i + 6, texts.lastIndex))
                 for (j in lookaheadRange) {
                     val candidate = texts[j]
 
                     // Check percentage
-                    val percentMatcher = PERCENT_PATTERN.matcher(candidate)
-                    if (percentMatcher.find()) {
-                        val pctStr = percentMatcher.group(1)?.replace(" ", "") ?: "0"
-                        val parsedPct = pctStr.toDoubleOrNull() ?: 0.0
+                    val parsedPct = parseMidasPercentage(candidate)
+                    if (parsedPct != null) {
                         changePercent = parsedPct
                         isPositive = parsedPct >= 0
                         val sign = if (isPositive) "+" else ""
@@ -305,15 +357,12 @@ class CryptoAccessibilityService : AccessibilityService() {
                     }
 
                     // Check price
-                    val priceMatcher = PRICE_PATTERN.matcher(candidate)
-                    if (priceMatcher.find() && rawPrice == 0.0 && !candidate.contains("%")) {
-                        val curr = priceMatcher.group(1) ?: "$"
-                        val numberStr = priceMatcher.group(2)?.replace(",", "") ?: "0"
-                        val parsed = numberStr.toDoubleOrNull() ?: 0.0
-                        if (parsed > 0) {
+                    if (rawPrice == 0.0 && !candidate.contains("%") && !candidate.contains("APY", ignoreCase = true)) {
+                        val parsed = parseMidasNumber(candidate)
+                        if (parsed != null && parsed > 0) {
                             rawPrice = parsed
-                            currencySymbol = curr
-                            priceFormatted = formatPrice(parsed, curr)
+                            currencySymbol = if (candidate.contains("₺")) "₺" else if (candidate.contains("€")) "€" else "$"
+                            priceFormatted = formatPrice(parsed, currencySymbol)
                         }
                     }
                 }
@@ -338,12 +387,12 @@ class CryptoAccessibilityService : AccessibilityService() {
             }
         }
 
-        if (detectedAssets.isNotEmpty() || detectedSymbols.isNotEmpty() || detectedCash != null) {
+        if (detectedAssets.isNotEmpty() || detectedSymbols.isNotEmpty() || effectiveCash != null) {
             CryptoOverlayRepository.addExtractedAssets(
                 assets = detectedAssets,
                 rawText = combinedText,
                 sourcePackage = packageName,
-                detectedCash = detectedCash
+                detectedCash = effectiveCash
             )
         }
     }
