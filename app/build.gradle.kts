@@ -1,4 +1,5 @@
 import com.google.gms.googleservices.GoogleServicesPlugin.MissingGoogleServicesStrategy
+import java.util.Base64
 
 plugins {
   alias(libs.plugins.android.application)
@@ -32,10 +33,20 @@ android {
       keyPassword = System.getenv("KEY_PASSWORD")
     }
     create("debugConfig") {
-      storeFile = file("${rootDir}/debug.keystore")
-      storePassword = "android"
-      keyAlias = "androiddebugkey"
-      keyPassword = "android"
+      val debugKeystore = file("${rootDir}/debug.keystore")
+      if (!debugKeystore.exists()) {
+        val base64File = file("${rootDir}/debug.keystore.base64")
+        if (base64File.exists()) {
+          val decoded = Base64.getDecoder().decode(base64File.readText().trim())
+          debugKeystore.writeBytes(decoded)
+        }
+      }
+      if (debugKeystore.exists()) {
+        storeFile = debugKeystore
+        storePassword = "android"
+        keyAlias = "androiddebugkey"
+        keyPassword = "android"
+      }
     }
   }
 
