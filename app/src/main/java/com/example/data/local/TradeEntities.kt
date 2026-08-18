@@ -116,6 +116,9 @@ interface TradeDao {
     @Query("SELECT * FROM dca_positions WHERE isClosed = 0 ORDER BY updatedAt DESC")
     fun getOpenPositions(): Flow<List<DcaPositionEntity>>
 
+    @Query("SELECT * FROM dca_positions WHERE isClosed = 0")
+    suspend fun getOpenPositionsOnce(): List<DcaPositionEntity>
+
     @Query("SELECT * FROM dca_positions WHERE symbol = :symbol AND isClosed = 0 LIMIT 1")
     suspend fun getOpenPositionForSymbol(symbol: String): DcaPositionEntity?
 

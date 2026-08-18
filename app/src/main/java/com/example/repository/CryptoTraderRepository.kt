@@ -15,11 +15,13 @@ import java.util.Locale
 
 data class TraderSettings(
     val isAutoScanActive: Boolean = true,
-    val targetNetProfitPercent: Double = 0.85, // %0.85 micro net profit
-    val cashAllocationPercent: Double = 25.0, // Allocate 25% of available Midas cash per trade
-    val maxDcaLevels: Int = 4,
+    val targetNetProfitPercent: Double = 1.80, // Minimum %1.80 NET kâr (komisyonlar tamamen ödendikten sonra)
+    val cashAllocationPercent: Double = 33.0, // Her işlemde nakdin %33'ü (Tek coin yerine dengeli 2-3 işlem)
+    val maxDcaLevels: Int = 3,
     val soundAlerts: Boolean = true,
-    val minBinanceLeadSpread: Double = 0.40 // Require Binance to lead by at least 0.40%
+    val minBinanceLeadSpread: Double = 0.85, // Binance'ın Midas'tan en az %0.85 önde gitmesi şartı (Gürültüyü engeller)
+    val maxConcurrentPositions: Int = 2, // Aynı anda en fazla 2 aktif işlem
+    val tradeCooldownMinutes: Int = 15 // Aynı coinde 15 dakika bekleme süresi
 )
 
 class CryptoTraderRepository(context: Context) {
@@ -29,6 +31,9 @@ class CryptoTraderRepository(context: Context) {
     val tradeDao: TradeDao = db.tradeDao()
 
     private val repositoryScope = CoroutineScope(Dispatchers.IO + SupervisorJob())
+
+    // Cooldown tracker: symbol -> last trade timestamp
+    private val lastTradeTimestampMap = mutableMapOf<String, Long>()
 
     private val _pendingSignal = MutableStateFlow<TradeSignalEntity?>(null)
     val pendingSignal: StateFlow<TradeSignalEntity?> = _pendingSignal.asStateFlow()
@@ -135,46 +140,57 @@ class CryptoTraderRepository(context: Context) {
                     }
                 }
 
-                // 2. Oracle & 5-Minute Technical Support & Lead-Lag Analysis for Midas Micro-Scalp Entry
-                if (_pendingSignal.value == null && _traderSettings.value.isAutoScanActive && currentCash >= 10.0) {
+                // 2. Oracle & 5-Minute Technical Support & Lead-Lag Analysis for Midas Scalp Entry
+                val activePositions = tradeDao.getOpenPositionsOnce()
+                val canOpenNewPosition = activePositions.size < _traderSettings.value.maxConcurrentPositions
+
+                if (_pendingSignal.value == null && _traderSettings.value.isAutoScanActive && currentCash >= 10.0 && canOpenNewPosition) {
                     val techMap = technicalAnalysisMap.value
+                    val now = System.currentTimeMillis()
+                    val cooldownMs = _traderSettings.value.tradeCooldownMinutes * 60 * 1000L
 
                     val candidate = currentAssets.firstOrNull { asset ->
                         if (asset.symbol.equals("USDT", ignoreCase = true)) return@firstOrNull false
+
+                        // Check Cooldown: Prevent over-trading the same coin repeatedly
+                        val lastTradeTime = lastTradeTimestampMap[asset.symbol] ?: 0L
+                        if (now - lastTradeTime < cooldownMs) {
+                            return@firstOrNull false
+                        }
 
                         val oracle = oracleMap[asset.symbol]
                         val spread = oracle?.leadLagSpreadPercent ?: 0.0
                         val tech = techMap[asset.symbol]
 
-                        // Overbought risk check: Never buy if 5m candle is overbought
-                        if (tech != null && tech.isOverboughtRisk) {
+                        // 1. Overbought / Peak Risk Check: Strict Gatekeeper
+                        if (tech != null && (tech.isOverboughtRisk || tech.rsi14 >= 58.0)) {
                             return@firstOrNull false
                         }
 
-                        // Check if self-learning metric provides optimal adaptive threshold
+                        // 2. Self-learning dynamic threshold
                         val learnedMetric = tradeDao.getMetricForKey("${asset.symbol}_Midas Kripto")
                         val requiredSpread = if (learnedMetric != null && learnedMetric.confidenceMultiplier > 1.0) {
-                            (_traderSettings.value.minBinanceLeadSpread / learnedMetric.confidenceMultiplier).coerceAtLeast(0.20)
+                            (_traderSettings.value.minBinanceLeadSpread / learnedMetric.confidenceMultiplier).coerceAtLeast(0.60)
                         } else {
                             _traderSettings.value.minBinanceLeadSpread
                         }
 
-                        // Criteria: Binance Lead + 5m Technical Confluence (or default valid spread if technical data still loading)
-                        val isTechnicalValid = tech == null || tech.confluenceScore >= 65 || tech.isSupportBounceValid || tech.rsi14 <= 55.0
+                        // 3. Strict Confluence: Must have real momentum lead + favorable technical setup
+                        val isTechnicalValid = tech != null && (tech.confluenceScore >= 70 || tech.isSupportBounceValid || tech.rsi14 <= 45.0)
                         val isSpreadValid = spread >= requiredSpread
 
                         isSpreadValid && isTechnicalValid && tradeDao.getOpenPositionForSymbol(asset.symbol) == null
                     }
 
                     if (candidate != null) {
-                        // Allocate clean whole dollar amount of current cash (e.g. 25% of $49 = $12 USDT)
+                        // Allocate clean whole dollar amount of current cash (e.g. 33% of $49 = $16 USDT)
                         val allocated = (currentCash * (_traderSettings.value.cashAllocationPercent / 100.0)).toInt().coerceIn(10, currentCash.toInt()).toDouble()
                         val tech = techMap[candidate.symbol]
 
                         val rationale = if (tech != null) {
                             "5dk Destek: $${String.format(Locale.US, "%.2f", tech.supportLevel)} | RSI: ${String.format(Locale.US, "%.1f", tech.rsi14)} | Binance %+${String.format(Locale.US, "%.2f", candidate.leadLagDiffPercent)} önde (Skor: ${tech.confluenceScore}/100)"
                         } else {
-                            "Binance Global %+${String.format(Locale.US, "%.2f", candidate.leadLagDiffPercent)} önde gidiyor. Midas gecikmeli fiyatından mikro kâr alımı."
+                            "Binance Global %+${String.format(Locale.US, "%.2f", candidate.leadLagDiffPercent)} önde. Komisyon korumalı kâr hedefi."
                         }
 
                         val signal = generateMidasOrderSignal(
@@ -196,8 +212,8 @@ class CryptoTraderRepository(context: Context) {
         symbol: String,
         currentPrice: Double,
         investedAmount: Double,
-        targetNetProfitPercent: Double = 0.0085,
-        rationale: String = "Midas Kripto Mikro Scalp Alımı"
+        targetNetProfitPercent: Double = 0.018,
+        rationale: String = "Midas Kripto Güvenli Scalp Alımı"
     ): TradeSignalEntity {
         val calc = CommissionCalculator.calculateTargetExit(
             entryPrice = currentPrice,
@@ -205,6 +221,8 @@ class CryptoTraderRepository(context: Context) {
             exchange = "Midas Kripto",
             targetNetProfitPercent = targetNetProfitPercent
         )
+
+        val feeRate = CommissionCalculator.EXCHANGE_FEE_RATES["Midas Kripto"] ?: 0.0020
 
         return TradeSignalEntity(
             symbol = symbol,
@@ -214,8 +232,8 @@ class CryptoTraderRepository(context: Context) {
             entryPrice = currentPrice,
             targetExitPrice = calc.targetExitPrice,
             investmentAmount = investedAmount,
-            buyFeeRate = 0.0008,
-            sellFeeRate = 0.0008,
+            buyFeeRate = feeRate,
+            sellFeeRate = feeRate,
             totalFeeAmount = calc.totalFees,
             guaranteedNetProfit = calc.guaranteedNetProfit,
             netProfitPercent = calc.netProfitPercent,
@@ -231,6 +249,7 @@ class CryptoTraderRepository(context: Context) {
      */
     fun confirmSignal(signal: TradeSignalEntity) {
         com.example.util.NotificationHelper.cancelSignalNotification(appContext, signal.id)
+        lastTradeTimestampMap[signal.symbol] = System.currentTimeMillis()
 
         // Trigger automated Midas screen interaction (Auto-Click 'Al'/'Sat' & Auto-Fill amount)
         com.example.service.CryptoAccessibilityService.executeMidasAssistOrder(

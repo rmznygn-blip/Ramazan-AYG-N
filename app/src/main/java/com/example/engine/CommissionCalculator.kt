@@ -4,17 +4,17 @@ import java.util.Locale
 
 object CommissionCalculator {
 
-    // Standard default exchange fee rates (can be customized by user)
+    // Standard exchange fee rates (Realistic Midas fees with safety buffer)
     val EXCHANGE_FEE_RATES = mapOf(
-        "Midas Kripto" to 0.0008, // 0.08%
-        "Binance TR" to 0.00075, // 0.075%
-        "BtcTurk" to 0.0009, // 0.09%
-        "Paribu" to 0.0015, // 0.15%
-        "Binance Global" to 0.00075, // 0.075%
+        "Midas Kripto" to 0.0020, // 0.20% Alış / 0.20% Satış (Toplam %0.40 Komisyon Kalkanı)
+        "Binance TR" to 0.0010, // 0.10%
+        "BtcTurk" to 0.0012, // 0.12%
+        "Paribu" to 0.0020, // 0.20%
+        "Binance Global" to 0.0008, // 0.08%
         "Kraken" to 0.0016 // 0.16%
     )
 
-    const val DEFAULT_SLIPPAGE_BUFFER = 0.0005 // 0.05% safety cushion
+    const val DEFAULT_SLIPPAGE_BUFFER = 0.0015 // 0.15% Spread ve Kayma Güvenlik Tamponu
 
     data class FeeCalculationResult(
         val entryPrice: Double,
@@ -39,11 +39,11 @@ object CommissionCalculator {
         entryPrice: Double,
         investedAmount: Double,
         exchange: String = "Midas Kripto",
-        targetNetProfitPercent: Double = 0.008, // 0.8% default micro-profit target
+        targetNetProfitPercent: Double = 0.018, // Minimum %1.80 Net Kâr Hedefi (Komisyonlar sonrası)
         slippageBuffer: Double = DEFAULT_SLIPPAGE_BUFFER
     ): FeeCalculationResult {
-        val buyFeeRate = EXCHANGE_FEE_RATES[exchange] ?: 0.0008
-        val sellFeeRate = EXCHANGE_FEE_RATES[exchange] ?: 0.0008
+        val buyFeeRate = EXCHANGE_FEE_RATES[exchange] ?: 0.0020
+        val sellFeeRate = EXCHANGE_FEE_RATES[exchange] ?: 0.0020
 
         val units = investedAmount / entryPrice
         val buyFeeAmount = investedAmount * buyFeeRate
