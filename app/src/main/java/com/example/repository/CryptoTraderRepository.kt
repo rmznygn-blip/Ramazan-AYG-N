@@ -24,6 +24,7 @@ data class TraderSettings(
 
 class CryptoTraderRepository(context: Context) {
 
+    private val appContext = context.applicationContext
     private val db = AppDatabase.getDatabase(context)
     val tradeDao: TradeDao = db.tradeDao()
 
@@ -110,12 +111,14 @@ class CryptoTraderRepository(context: Context) {
                         )) {
                             is DcaStrategyEngine.PositionEvaluation.TriggerTakeProfit -> {
                                 if (_pendingSignal.value == null) {
-                                    tradeDao.insertSignal(eval.signal)
+                                    val id = tradeDao.insertSignal(eval.signal)
+                                    com.example.util.NotificationHelper.showTradeSignalNotification(appContext, eval.signal.copy(id = id))
                                 }
                             }
                             is DcaStrategyEngine.PositionEvaluation.TriggerDcaAdd -> {
                                 if (_pendingSignal.value == null) {
-                                    tradeDao.insertSignal(eval.signal)
+                                    val id = tradeDao.insertSignal(eval.signal)
+                                    com.example.util.NotificationHelper.showTradeSignalNotification(appContext, eval.signal.copy(id = id))
                                 }
                             }
                             is DcaStrategyEngine.PositionEvaluation.Hold -> {
@@ -181,7 +184,8 @@ class CryptoTraderRepository(context: Context) {
                             targetNetProfitPercent = _traderSettings.value.targetNetProfitPercent / 100.0,
                             rationale = rationale
                         )
-                        tradeDao.insertSignal(signal)
+                        val id = tradeDao.insertSignal(signal)
+                        com.example.util.NotificationHelper.showTradeSignalNotification(appContext, signal.copy(id = id))
                     }
                 }
             }
@@ -226,6 +230,8 @@ class CryptoTraderRepository(context: Context) {
      * User Confirms the Midas Order
      */
     fun confirmSignal(signal: TradeSignalEntity) {
+        com.example.util.NotificationHelper.cancelSignalNotification(appContext, signal.id)
+
         // Trigger automated Midas screen interaction (Auto-Click 'Al'/'Sat' & Auto-Fill amount)
         com.example.service.CryptoAccessibilityService.executeMidasAssistOrder(
             actionType = signal.actionType,
@@ -306,6 +312,7 @@ class CryptoTraderRepository(context: Context) {
      * User Rejects the Signal
      */
     fun rejectSignal(signal: TradeSignalEntity) {
+        com.example.util.NotificationHelper.cancelSignalNotification(appContext, signal.id)
         repositoryScope.launch {
             tradeDao.updateSignalStatus(signal.id, "REJECTED")
             SelfLearningEngine.recordUserRejection(tradeDao, signal)
@@ -328,7 +335,8 @@ class CryptoTraderRepository(context: Context) {
                 targetNetProfitPercent = _traderSettings.value.targetNetProfitPercent / 100.0,
                 rationale = "Binance Oracle onaylı Midas Mikro Alış Emri."
             )
-            tradeDao.insertSignal(signal)
+            val id = tradeDao.insertSignal(signal)
+            com.example.util.NotificationHelper.showTradeSignalNotification(appContext, signal.copy(id = id))
         }
     }
 

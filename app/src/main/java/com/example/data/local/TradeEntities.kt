@@ -91,6 +91,12 @@ interface TradeDao {
     @Query("SELECT * FROM trade_signals WHERE status = 'PENDING' ORDER BY createdAt DESC LIMIT 1")
     fun getActivePendingSignal(): Flow<TradeSignalEntity?>
 
+    @Query("SELECT * FROM trade_signals WHERE status = 'PENDING' ORDER BY createdAt DESC LIMIT 1")
+    suspend fun getActivePendingSignalOnce(): TradeSignalEntity?
+
+    @Query("SELECT * FROM trade_signals WHERE id = :id LIMIT 1")
+    suspend fun getSignalById(id: Long): TradeSignalEntity?
+
     @Query("SELECT * FROM trade_signals WHERE status = 'PENDING' ORDER BY createdAt DESC")
     fun getAllPendingSignals(): Flow<List<TradeSignalEntity>>
 

@@ -65,6 +65,14 @@ class MainActivity : ComponentActivity() {
         enableEdgeToEdge()
 
         traderRepository = CryptoTraderRepository.getInstance(this)
+        com.example.util.NotificationHelper.createNotificationChannels(this)
+
+        // Request POST_NOTIFICATIONS for Android 13+ if not granted
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            if (!com.example.util.PermissionHelper.hasNotificationPermission(this)) {
+                requestPermissions(arrayOf(android.Manifest.permission.POST_NOTIFICATIONS), 101)
+            }
+        }
 
         setContent {
             MyApplicationTheme {
