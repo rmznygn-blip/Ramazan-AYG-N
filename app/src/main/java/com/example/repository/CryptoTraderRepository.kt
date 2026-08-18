@@ -131,23 +131,33 @@ class CryptoTraderRepository(context: Context) {
                 }
 
                 // 2. Oracle & Lead-Lag Analysis for Midas Micro-Scalp Entry
-                if (_pendingSignal.value == null && _traderSettings.value.isAutoScanActive) {
+                if (_pendingSignal.value == null && _traderSettings.value.isAutoScanActive && currentCash >= 10.0) {
                     val candidate = currentAssets.firstOrNull { asset ->
                         val oracle = oracleMap[asset.symbol]
                         val spread = oracle?.leadLagSpreadPercent ?: 0.0
+                        // Check if self-learning metric provides optimal adaptive threshold
+                        val learnedMetric = tradeDao.getMetricForKey("${asset.symbol}_Midas Kripto")
+                        val requiredSpread = if (learnedMetric != null && learnedMetric.confidenceMultiplier > 1.0) {
+                            (_traderSettings.value.minBinanceLeadSpread / learnedMetric.confidenceMultiplier).coerceAtLeast(0.25)
+                        } else {
+                            _traderSettings.value.minBinanceLeadSpread
+                        }
+
                         // Binance leads Midas by >= threshold and no open position
-                        spread >= _traderSettings.value.minBinanceLeadSpread &&
-                                tradeDao.getOpenPositionForSymbol(asset.symbol) == null
+                        spread >= requiredSpread && tradeDao.getOpenPositionForSymbol(asset.symbol) == null
                     }
 
                     if (candidate != null) {
-                        val tradeAmount = (currentCash * (_traderSettings.value.cashAllocationPercent / 100.0)).coerceAtLeast(20.0)
+                        // Allocate percentage of current cash (e.g. 25% of $50 = $12.50)
+                        val allocated = currentCash * (_traderSettings.value.cashAllocationPercent / 100.0)
+                        val tradeAmount = allocated.coerceIn(10.0, currentCash)
+
                         val signal = generateMidasOrderSignal(
                             symbol = candidate.symbol,
                             currentPrice = candidate.rawPrice,
                             investedAmount = tradeAmount,
                             targetNetProfitPercent = _traderSettings.value.targetNetProfitPercent / 100.0,
-                            rationale = "Binance Global %+${String.format("%.2f", candidate.leadLagDiffPercent)} önde gidiyor. Midas gecikmeli fiyatından garantili kâr alımı."
+                            rationale = "Binance Global %+${String.format("%.2f", candidate.leadLagDiffPercent)} önde gidiyor. Midas gecikmeli fiyatından garantili mikro kâr alımı."
                         )
                         tradeDao.insertSignal(signal)
                     }
@@ -194,6 +204,13 @@ class CryptoTraderRepository(context: Context) {
      * User Confirms the Midas Order
      */
     fun confirmSignal(signal: TradeSignalEntity) {
+        // Trigger automated Midas screen interaction (Auto-Click 'Al'/'Sat' & Auto-Fill amount)
+        com.example.service.CryptoAccessibilityService.executeMidasAssistOrder(
+            actionType = signal.actionType,
+            amount = signal.investmentAmount,
+            price = signal.entryPrice
+        )
+
         repositoryScope.launch {
             tradeDao.updateSignalStatus(signal.id, "EXECUTED")
             SelfLearningEngine.recordUserConfirmation(tradeDao, signal)

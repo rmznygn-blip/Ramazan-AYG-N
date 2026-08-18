@@ -2,18 +2,31 @@ package com.example.service
 
 import android.accessibilityservice.AccessibilityService
 import android.accessibilityservice.AccessibilityServiceInfo
+import android.content.ClipData
+import android.content.ClipboardManager
+import android.content.Context
+import android.os.Bundle
 import android.util.Log
 import android.view.accessibility.AccessibilityEvent
 import android.view.accessibility.AccessibilityNodeInfo
 import com.example.model.CryptoAsset
 import com.example.repository.CryptoOverlayRepository
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
 import java.util.Locale
 import java.util.regex.Pattern
 
 class CryptoAccessibilityService : AccessibilityService() {
 
+    private val serviceScope = CoroutineScope(Dispatchers.Main)
+
     companion object {
         private const val TAG = "CryptoAccessibility"
+        @Volatile
+        var instance: CryptoAccessibilityService? = null
+
         private val KNOWN_SYMBOLS = listOf(
             "SOL", "BTC", "ETH", "AVAX", "XRP", "DOGE", "USDT", "ADA",
             "DOT", "LINK", "NEAR", "PEPE", "SHIB", "TRX", "SUI", "ARB", "RENDER", "BNB"
@@ -21,10 +34,15 @@ class CryptoAccessibilityService : AccessibilityService() {
         private val PRICE_PATTERN = Pattern.compile("([$₺€])?\\s*([0-9]{1,3}(?:,[0-9]{3})*(?:\\.[0-9]{1,4})?|[0-9]+(?:\\.[0-9]{1,4})?)")
         private val PERCENT_PATTERN = Pattern.compile("([+-]?\\s*[0-9]+(?:\\.[0-9]{1,2})?)\\s*%")
         private val CASH_KEYWORDS = listOf("kullanılabilir", "nakit", "alım gücü", "bakiye", "available", "cash", "cüzdan")
+
+        fun executeMidasAssistOrder(actionType: String, amount: Double, price: Double = 0.0) {
+            instance?.triggerOrderAssist(actionType, amount, price)
+        }
     }
 
     override fun onServiceConnected() {
         super.onServiceConnected()
+        instance = this
         Log.d(TAG, "CryptoAccessibilityService Connected")
         CryptoOverlayRepository.updateAccessibilityConnected(true)
 
@@ -39,6 +57,95 @@ class CryptoAccessibilityService : AccessibilityService() {
             notificationTimeout = 100
         }
         serviceInfo = info
+    }
+
+    fun triggerOrderAssist(actionType: String, amount: Double, price: Double) {
+        val targetButtonText = if (actionType.contains("SELL") || actionType.contains("PROFIT")) "Sat" else "Al"
+        val formattedAmount = if (amount % 1.0 == 0.0) "${amount.toInt()}" else String.format(Locale.US, "%.2f", amount)
+
+        // 1. Copy amount to clipboard for instant pasting fallback
+        try {
+            val clipboard = getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
+            val clip = ClipData.newPlainText("Midas Trade Amount", formattedAmount)
+            clipboard.setPrimaryClip(clip)
+        } catch (ignored: Exception) {}
+
+        serviceScope.launch {
+            // Step 1: Find and click the "Al" or "Sat" button on Midas
+            val root = rootInActiveWindow
+            if (root != null) {
+                val buttonFound = findAndClickNodeWithText(root, targetButtonText)
+                try { root.recycle() } catch (ignored: Exception) {}
+
+                if (buttonFound) {
+                    delay(600L) // Wait for order sheet/screen to animate in
+
+                    // Step 2: Look for amount input field and automatically fill the calculated amount
+                    val orderSheetRoot = rootInActiveWindow
+                    if (orderSheetRoot != null) {
+                        fillAmountInEditText(orderSheetRoot, formattedAmount)
+                        try { orderSheetRoot.recycle() } catch (ignored: Exception) {}
+                    }
+                }
+            }
+        }
+    }
+
+    private fun findAndClickNodeWithText(node: AccessibilityNodeInfo?, text: String): Boolean {
+        if (node == null) return false
+
+        val nodeText = node.text?.toString()?.trim() ?: ""
+        val contentDesc = node.contentDescription?.toString()?.trim() ?: ""
+
+        if (nodeText.equals(text, ignoreCase = true) || contentDesc.equals(text, ignoreCase = true)) {
+            if (node.isClickable) {
+                node.performAction(AccessibilityNodeInfo.ACTION_CLICK)
+                return true
+            } else {
+                var parent = node.parent
+                while (parent != null) {
+                    if (parent.isClickable) {
+                        parent.performAction(AccessibilityNodeInfo.ACTION_CLICK)
+                        try { parent.recycle() } catch (ignored: Exception) {}
+                        return true
+                    }
+                    val nextParent = parent.parent
+                    try { parent.recycle() } catch (ignored: Exception) {}
+                    parent = nextParent
+                }
+            }
+        }
+
+        for (i in 0 until node.childCount) {
+            val child = node.getChild(i)
+            val clicked = findAndClickNodeWithText(child, text)
+            try { child?.recycle() } catch (ignored: Exception) {}
+            if (clicked) return true
+        }
+
+        return false
+    }
+
+    private fun fillAmountInEditText(node: AccessibilityNodeInfo?, amount: String): Boolean {
+        if (node == null) return false
+
+        if (node.isEditable || node.className?.toString()?.contains("EditText") == true) {
+            val arguments = Bundle().apply {
+                putCharSequence(AccessibilityNodeInfo.ACTION_ARGUMENT_SET_TEXT_CHARSEQUENCE, amount)
+            }
+            node.performAction(AccessibilityNodeInfo.ACTION_FOCUS)
+            node.performAction(AccessibilityNodeInfo.ACTION_SET_TEXT, arguments)
+            return true
+        }
+
+        for (i in 0 until node.childCount) {
+            val child = node.getChild(i)
+            val filled = fillAmountInEditText(child, amount)
+            try { child?.recycle() } catch (ignored: Exception) {}
+            if (filled) return true
+        }
+
+        return false
     }
 
     override fun onAccessibilityEvent(event: AccessibilityEvent?) {

@@ -100,9 +100,9 @@ object CryptoOverlayRepository {
 
     private val _midasAccountState = MutableStateFlow(
         MidasAccountState(
-            availableCash = 450.00,
+            availableCash = 50.00,
             currencySymbol = "$",
-            isCashDetectedFromScreen = true,
+            isCashDetectedFromScreen = false,
             currentViewedSymbol = "SOL"
         )
     )
