@@ -13,6 +13,26 @@ import kotlinx.coroutines.*
 import kotlinx.coroutines.flow.*
 import java.util.Locale
 
+data class LiveRankedSignal(
+    val id: String,
+    val symbol: String,
+    val pair: String,
+    val exchange: String,
+    val currentPrice: Double,
+    val suggestedEntryPrice: Double,
+    val targetExitPrice: Double,
+    val guaranteedNetProfit: Double,
+    val netProfitPercent: Double,
+    val confidenceScorePercent: Int, // e.g. 94%
+    val binanceLeadPercent: Double, // e.g. +1.15%
+    val rsi14: Double,
+    val supportLevel: Double,
+    val resistanceLevel: Double,
+    val rationale: String,
+    val generatedTimeFormatted: String, // e.g. "18:24:10"
+    val timestamp: Long = System.currentTimeMillis()
+)
+
 data class TraderSettings(
     val isAutoScanActive: Boolean = true,
     val isEveningSniperMode: Boolean = true, // Sakin Akşam Seansı: Sadece en dip destek noktalarından alım yapar
@@ -49,6 +69,9 @@ class CryptoTraderRepository(context: Context) {
     val midasAccountState: StateFlow<MidasAccountState> = CryptoOverlayRepository.midasAccountState
     val binanceOracleMap: StateFlow<Map<String, BinanceOracleData>> = CryptoOverlayRepository.binanceOracleMap
     val technicalAnalysisMap = CryptoOverlayRepository.technicalAnalysisMap
+
+    private val _rankedLiveSignals = MutableStateFlow<List<LiveRankedSignal>>(emptyList())
+    val rankedLiveSignals: StateFlow<List<LiveRankedSignal>> = _rankedLiveSignals.asStateFlow()
 
     private val _traderSettings = MutableStateFlow(TraderSettings())
     val traderSettings: StateFlow<TraderSettings> = _traderSettings.asStateFlow()
@@ -144,7 +167,78 @@ class CryptoTraderRepository(context: Context) {
                     }
                 }
 
-                // 2. Oracle & 5-Minute Technical Support & Lead-Lag Analysis for Midas Scalp Entry
+                // 3. Compute Real-time Ranked Live Opportunity Signals for all active assets
+                val timeFormat = java.text.SimpleDateFormat("HH:mm:ss", Locale.getDefault())
+                val currentTimeStr = timeFormat.format(java.util.Date())
+                val techMap = technicalAnalysisMap.value
+
+                val rankedList = currentAssets.filter { !it.symbol.equals("USDT", ignoreCase = true) }.map { asset ->
+                    val oracle = oracleMap[asset.symbol]
+                    val spread = oracle?.leadLagSpreadPercent ?: asset.leadLagDiffPercent
+                    val tech = techMap[asset.symbol]
+
+                    val entryPrice = if (tech != null && tech.supportLevel > 0.0 && tech.supportLevel < asset.rawPrice) {
+                        (tech.supportLevel * 1.002).coerceAtMost(asset.rawPrice)
+                    } else {
+                        asset.rawPrice
+                    }
+
+                    val exitCalc = CommissionCalculator.calculateTargetExit(
+                        entryPrice = entryPrice,
+                        investedAmount = 25.0,
+                        exchange = "Midas Kripto",
+                        targetNetProfitPercent = _traderSettings.value.targetNetProfitPercent / 100.0
+                    )
+
+                    // Calculate Confidence Score (0 - 100%)
+                    val rsiScore = if (tech != null) {
+                        when {
+                            tech.rsi14 <= 35.0 -> 35
+                            tech.rsi14 <= 45.0 -> 28
+                            tech.rsi14 <= 55.0 -> 18
+                            else -> 10
+                        }
+                    } else 20
+
+                    val spreadScore = when {
+                        spread >= 1.20 -> 35
+                        spread >= 0.80 -> 30
+                        spread >= 0.40 -> 20
+                        spread > 0.0 -> 12
+                        else -> 5
+                    }
+
+                    val confluenceScore = tech?.confluenceScore?.times(0.30)?.toInt() ?: 15
+                    val totalConfidence = (rsiScore + spreadScore + confluenceScore).coerceIn(45, 98)
+
+                    val rationale = if (tech != null) {
+                        "5Dk RSI: ${String.format(Locale.US, "%.1f", tech.rsi14)} | Binance: %+${String.format(Locale.US, "%.2f", spread)} Öncü | Destek: $${String.format(Locale.US, "%.2f", tech.supportLevel)}"
+                    } else {
+                        "Binance %+${String.format(Locale.US, "%.2f", spread)} yukarı öncülük ediyor. Güvenli giriş bölgesi."
+                    }
+
+                    LiveRankedSignal(
+                        id = "${asset.symbol}_${System.currentTimeMillis()}",
+                        symbol = asset.symbol,
+                        pair = "${asset.symbol}/USDT",
+                        exchange = "Midas Kripto",
+                        currentPrice = asset.rawPrice,
+                        suggestedEntryPrice = entryPrice,
+                        targetExitPrice = exitCalc.targetExitPrice,
+                        guaranteedNetProfit = exitCalc.guaranteedNetProfit,
+                        netProfitPercent = exitCalc.netProfitPercent,
+                        confidenceScorePercent = totalConfidence,
+                        binanceLeadPercent = spread,
+                        rsi14 = tech?.rsi14 ?: 50.0,
+                        supportLevel = tech?.supportLevel ?: (asset.rawPrice * 0.98),
+                        resistanceLevel = tech?.resistanceLevel ?: (asset.rawPrice * 1.02),
+                        rationale = rationale,
+                        generatedTimeFormatted = currentTimeStr,
+                        timestamp = System.currentTimeMillis()
+                    )
+                }.sortedByDescending { it.confidenceScorePercent }
+
+                _rankedLiveSignals.value = rankedList
                 val activePositions = tradeDao.getOpenPositionsOnce()
                 val canOpenNewPosition = activePositions.size < _traderSettings.value.maxConcurrentPositions
 
@@ -352,6 +446,24 @@ class CryptoTraderRepository(context: Context) {
         repositoryScope.launch {
             tradeDao.updateSignalStatus(signal.id, "REJECTED")
             SelfLearningEngine.recordUserRejection(tradeDao, signal)
+        }
+    }
+
+    /**
+     * Trigger and execute a signal chosen directly from Live Opportunity Matrix
+     */
+    fun triggerSignalFromLiveRanked(ranked: LiveRankedSignal) {
+        repositoryScope.launch {
+            val tradeAmount = (midasAccountState.value.availableCash * (_traderSettings.value.cashAllocationPercent / 100.0)).toInt().coerceIn(10, midasAccountState.value.availableCash.toInt().coerceAtLeast(10)).toDouble()
+            val generated = generateMidasOrderSignal(
+                symbol = ranked.symbol,
+                currentPrice = ranked.suggestedEntryPrice,
+                investedAmount = tradeAmount,
+                targetNetProfitPercent = ranked.netProfitPercent / 100.0,
+                rationale = ranked.rationale
+            )
+            val id = tradeDao.insertSignal(generated)
+            confirmSignal(generated.copy(id = id))
         }
     }
 

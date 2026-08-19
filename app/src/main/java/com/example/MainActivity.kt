@@ -46,6 +46,7 @@ import com.example.model.OverlayConfig
 import com.example.model.ScreenReaderLog
 import com.example.repository.CryptoOverlayRepository
 import com.example.repository.CryptoTraderRepository
+import com.example.repository.LiveRankedSignal
 import com.example.repository.TraderSettings
 import com.example.service.CryptoAccessibilityService
 import com.example.service.FloatingOverlayContent
@@ -94,6 +95,7 @@ class MainActivity : ComponentActivity() {
                 val openPositions by traderRepository.openPositions.collectAsState(initial = emptyList())
                 val learningMetrics by traderRepository.learningMetrics.collectAsState(initial = emptyList())
                 val traderSettings by traderRepository.traderSettings.collectAsState()
+                val rankedSignals by traderRepository.rankedLiveSignals.collectAsState()
 
                 Scaffold(
                     modifier = Modifier
@@ -133,6 +135,11 @@ class MainActivity : ComponentActivity() {
                         openPositions = openPositions,
                         learningMetrics = learningMetrics,
                         settings = traderSettings,
+                        rankedSignals = rankedSignals,
+                        onSelectRankedSignal = { selected ->
+                            traderRepository.triggerSignalFromLiveRanked(selected)
+                            Toast.makeText(this, "🚀 ${selected.symbol} seçildi! Midas alım emri hazırlandı.", Toast.LENGTH_SHORT).show()
+                        },
                         onRequestOverlayPermission = { requestOverlayPermission() },
                         onRequestAccessibilityPermission = { requestAccessibilityPermission() },
                         onRequestBatteryOptimization = { requestBatteryOptimizationExemption() },
@@ -342,6 +349,8 @@ fun MidasTraderMainScreen(
     openPositions: List<DcaPositionEntity>,
     learningMetrics: List<LearningMetricEntity>,
     settings: TraderSettings,
+    rankedSignals: List<LiveRankedSignal>,
+    onSelectRankedSignal: (LiveRankedSignal) -> Unit,
     onRequestOverlayPermission: () -> Unit,
     onRequestAccessibilityPermission: () -> Unit,
     onRequestBatteryOptimization: () -> Unit,
@@ -412,7 +421,7 @@ fun MidasTraderMainScreen(
             )
         }
 
-        // 4. TAB SELECTOR (6 TABS)
+        // 5. TAB SELECTOR (7 TABS)
         item {
             Row(
                 modifier = Modifier
@@ -424,53 +433,68 @@ fun MidasTraderMainScreen(
                 horizontalArrangement = Arrangement.spacedBy(2.dp)
             ) {
                 MainTabButton(
-                    title = "HUD",
-                    icon = Icons.Default.Visibility,
+                    title = "🎯 Sinyal (${rankedSignals.size})",
+                    icon = Icons.Default.Bolt,
                     selected = selectedTab == 0,
-                    modifier = Modifier.weight(0.9f),
+                    modifier = Modifier.weight(1.3f),
                     onClick = { selectedTab = 0 }
                 )
                 MainTabButton(
-                    title = "5Dk Mum",
-                    icon = Icons.Default.ShowChart,
+                    title = "HUD",
+                    icon = Icons.Default.Visibility,
                     selected = selectedTab == 1,
-                    modifier = Modifier.weight(1.2f),
+                    modifier = Modifier.weight(0.8f),
                     onClick = { selectedTab = 1 }
+                )
+                MainTabButton(
+                    title = "5Dk",
+                    icon = Icons.Default.ShowChart,
+                    selected = selectedTab == 2,
+                    modifier = Modifier.weight(0.8f),
+                    onClick = { selectedTab = 2 }
                 )
                 MainTabButton(
                     title = "DCA (${openPositions.size})",
                     icon = Icons.Default.AccountTree,
-                    selected = selectedTab == 2,
-                    modifier = Modifier.weight(1.1f),
-                    onClick = { selectedTab = 2 }
+                    selected = selectedTab == 3,
+                    modifier = Modifier.weight(1.0f),
+                    onClick = { selectedTab = 3 }
                 )
                 MainTabButton(
                     title = "AI",
                     icon = Icons.Default.Psychology,
-                    selected = selectedTab == 3,
-                    modifier = Modifier.weight(0.8f),
-                    onClick = { selectedTab = 3 }
+                    selected = selectedTab == 4,
+                    modifier = Modifier.weight(0.7f),
+                    onClick = { selectedTab = 4 }
                 )
                 MainTabButton(
                     title = "Rapor",
                     icon = Icons.Default.Analytics,
-                    selected = selectedTab == 4,
-                    modifier = Modifier.weight(0.9f),
-                    onClick = { selectedTab = 4 }
-                )
-                MainTabButton(
-                    title = "Ayar",
-                    icon = Icons.Default.Tune,
                     selected = selectedTab == 5,
                     modifier = Modifier.weight(0.8f),
                     onClick = { selectedTab = 5 }
                 )
+                MainTabButton(
+                    title = "Ayar",
+                    icon = Icons.Default.Tune,
+                    selected = selectedTab == 6,
+                    modifier = Modifier.weight(0.8f),
+                    onClick = { selectedTab = 6 }
+                )
             }
         }
 
-        // 5. TAB CONTENTS
+        // 6. TAB CONTENTS
         when (selectedTab) {
             0 -> {
+                item {
+                    LiveSignalPickerSection(
+                        rankedSignals = rankedSignals,
+                        onSelectSignal = onSelectRankedSignal
+                    )
+                }
+            }
+            1 -> {
                 item {
                     LiveMidasPreviewCard(
                         config = config,
@@ -483,7 +507,7 @@ fun MidasTraderMainScreen(
                     )
                 }
             }
-            1 -> {
+            2 -> {
                 item {
                     TechnicalAnalysis5mSection(
                         technicalMap = technicalAnalysisMap,
@@ -491,7 +515,7 @@ fun MidasTraderMainScreen(
                     )
                 }
             }
-            2 -> {
+            3 -> {
                 item {
                     MidasDcaPositionMatrixSection(
                         openPositions = openPositions,
@@ -500,12 +524,12 @@ fun MidasTraderMainScreen(
                     )
                 }
             }
-            3 -> {
+            4 -> {
                 item {
                     SelfLearningSection(learningMetrics = learningMetrics)
                 }
             }
-            4 -> {
+            5 -> {
                 item {
                     DiagnosticsAndReportRoomSection(
                         midasAccount = midasAccount,
@@ -518,7 +542,7 @@ fun MidasTraderMainScreen(
                     )
                 }
             }
-            5 -> {
+            6 -> {
                 item {
                     MidasTraderSettingsSection(
                         settings = settings,
@@ -2444,6 +2468,358 @@ fun TechnicalAnalysis5mSection(
                     }
                 }
             }
+        }
+    }
+}
+
+@Composable
+fun LiveSignalPickerSection(
+    rankedSignals: List<LiveRankedSignal>,
+    onSelectSignal: (LiveRankedSignal) -> Unit
+) {
+    var sortMode by remember { mutableIntStateOf(0) } // 0: Güvenilirlik, 1: Kâr Oranı, 2: En Güncel
+    val context = LocalContext.current
+
+    val sortedList = remember(rankedSignals, sortMode) {
+        when (sortMode) {
+            0 -> rankedSignals.sortedByDescending { it.confidenceScorePercent }
+            1 -> rankedSignals.sortedByDescending { it.netProfitPercent }
+            else -> rankedSignals.sortedByDescending { it.timestamp }
+        }
+    }
+
+    Column(
+        modifier = Modifier.fillMaxWidth(),
+        verticalArrangement = Arrangement.spacedBy(12.dp)
+    ) {
+        // Section Header
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Column {
+                Text(
+                    text = "⚡ GÜNCEL FIRSAT VE SİNYAL SEÇİCİ",
+                    color = Color.White,
+                    fontWeight = FontWeight.Black,
+                    fontSize = 13.sp,
+                    fontFamily = FontFamily.Monospace
+                )
+                Text(
+                    text = "Gecikmesiz • Anlık Emir Saati & Güvenilirlik Skoru",
+                    color = CyberCyan,
+                    fontSize = 10.sp,
+                    fontFamily = FontFamily.Monospace
+                )
+            }
+
+            Surface(
+                color = CyberEmerald.copy(alpha = 0.15f),
+                shape = RoundedCornerShape(8.dp)
+            ) {
+                Text(
+                    text = "● ${sortedList.size} CANLI EMİR",
+                    color = CyberEmerald,
+                    fontSize = 10.sp,
+                    fontWeight = FontWeight.Bold,
+                    fontFamily = FontFamily.Monospace,
+                    modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
+                )
+            }
+        }
+
+        // Filter / Sort Chips
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(6.dp)
+        ) {
+            FilterChipButton(
+                title = "🏆 En Yüksek Güvenilirlik",
+                selected = sortMode == 0,
+                modifier = Modifier.weight(1.1f),
+                onClick = { sortMode = 0 }
+            )
+            FilterChipButton(
+                title = "💰 En İyi Kâr",
+                selected = sortMode == 1,
+                modifier = Modifier.weight(0.9f),
+                onClick = { sortMode = 1 }
+            )
+            FilterChipButton(
+                title = "⏱️ En Güncel",
+                selected = sortMode == 2,
+                modifier = Modifier.weight(0.9f),
+                onClick = { sortMode = 2 }
+            )
+        }
+
+        if (sortedList.isEmpty()) {
+            Surface(
+                modifier = Modifier.fillMaxWidth(),
+                color = OledSurface,
+                shape = RoundedCornerShape(12.dp),
+                border = androidx.compose.foundation.BorderStroke(1.dp, OledCardBorder)
+            ) {
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(24.dp),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Text(
+                        text = "Canlı piyasa taranıyor... Sinyaller hazırlanıyor.",
+                        color = TextSecondary,
+                        fontSize = 12.sp,
+                        fontFamily = FontFamily.Monospace
+                    )
+                }
+            }
+        } else {
+            sortedList.forEach { signal ->
+                LiveSignalOpportunityCard(
+                    signal = signal,
+                    onSelect = { onSelectSignal(signal) },
+                    onCopyPrices = {
+                        val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
+                        val clip = ClipData.newPlainText(
+                            "${signal.symbol} Limit Emir",
+                            "Varlık: ${signal.symbol}/USDT\nAlış: $${String.format(Locale.US, "%.2f", signal.suggestedEntryPrice)}\nHedef Satış: $${String.format(Locale.US, "%.2f", signal.targetExitPrice)}\nNet Kâr: %${String.format(Locale.US, "%.2f", signal.netProfitPercent)}"
+                        )
+                        clipboard.setPrimaryClip(clip)
+                        Toast.makeText(context, "📋 ${signal.symbol} Alış & Satış Fiyatları Kopyalandı!", Toast.LENGTH_SHORT).show()
+                    }
+                )
+            }
+        }
+    }
+}
+
+@Composable
+fun LiveSignalOpportunityCard(
+    signal: LiveRankedSignal,
+    onSelect: () -> Unit,
+    onCopyPrices: () -> Unit
+) {
+    val isHighConfidence = signal.confidenceScorePercent >= 80
+
+    Surface(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(14.dp))
+            .border(
+                1.2.dp,
+                if (isHighConfidence) CyberEmerald.copy(alpha = 0.8f) else OledCardBorder,
+                RoundedCornerShape(14.dp)
+            ),
+        color = Color(0xFF070B12)
+    ) {
+        Column(
+            modifier = Modifier.padding(14.dp),
+            verticalArrangement = Arrangement.spacedBy(10.dp)
+        ) {
+            // Header: Symbol, Timestamp & Freshness
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Text(
+                        text = signal.pair,
+                        color = Color.White,
+                        fontWeight = FontWeight.Black,
+                        fontSize = 16.sp,
+                        fontFamily = FontFamily.Monospace
+                    )
+                    Surface(
+                        color = CyberEmerald.copy(alpha = 0.2f),
+                        shape = RoundedCornerShape(4.dp)
+                    ) {
+                        Text(
+                            text = "● GÜNCEL",
+                            color = CyberEmerald,
+                            fontSize = 9.sp,
+                            fontWeight = FontWeight.Black,
+                            fontFamily = FontFamily.Monospace,
+                            modifier = Modifier.padding(horizontal = 5.dp, vertical = 2.dp)
+                        )
+                    }
+                }
+
+                // Time of generation
+                Text(
+                    text = "Saat: ${signal.generatedTimeFormatted}",
+                    color = CyberCyan,
+                    fontSize = 11.sp,
+                    fontWeight = FontWeight.Bold,
+                    fontFamily = FontFamily.Monospace
+                )
+            }
+
+            // Score Badges Row: Confidence Score & Net Profit
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                Surface(
+                    modifier = Modifier.weight(1f),
+                    color = if (isHighConfidence) CyberEmerald.copy(alpha = 0.15f) else Color(0xFF131A26),
+                    shape = RoundedCornerShape(8.dp),
+                    border = androidx.compose.foundation.BorderStroke(
+                        1.dp,
+                        if (isHighConfidence) CyberEmerald else OledCardBorder
+                    )
+                ) {
+                    Row(
+                        modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.SpaceBetween
+                    ) {
+                        Text("Güvenilirlik:", color = TextSecondary, fontSize = 11.sp)
+                        Text(
+                            text = "%${signal.confidenceScorePercent} GÜVEN",
+                            color = if (isHighConfidence) CyberEmerald else CyberCyan,
+                            fontWeight = FontWeight.Black,
+                            fontSize = 12.sp,
+                            fontFamily = FontFamily.Monospace
+                        )
+                    }
+                }
+
+                Surface(
+                    modifier = Modifier.weight(1f),
+                    color = CyberEmerald.copy(alpha = 0.15f),
+                    shape = RoundedCornerShape(8.dp),
+                    border = androidx.compose.foundation.BorderStroke(1.dp, CyberEmerald)
+                ) {
+                    Row(
+                        modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.SpaceBetween
+                    ) {
+                        Text("Net Kâr:", color = TextSecondary, fontSize = 11.sp)
+                        Text(
+                            text = "+%${String.format(Locale.US, "%.2f", signal.netProfitPercent)}",
+                            color = CyberEmerald,
+                            fontWeight = FontWeight.Black,
+                            fontSize = 12.sp,
+                            fontFamily = FontFamily.Monospace
+                        )
+                    }
+                }
+            }
+
+            // Price Details Box
+            Surface(
+                modifier = Modifier.fillMaxWidth(),
+                color = Color(0xFF03060A),
+                shape = RoundedCornerShape(8.dp),
+                border = androidx.compose.foundation.BorderStroke(0.6.dp, OledCardBorder)
+            ) {
+                Column(modifier = Modifier.padding(10.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                    Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                        Text("Güncel Piyasa:", color = TextTertiary, fontSize = 11.sp, fontFamily = FontFamily.Monospace)
+                        Text("$${String.format(Locale.US, "%.2f", signal.currentPrice)}", color = Color.White, fontSize = 11.sp, fontFamily = FontFamily.Monospace)
+                    }
+                    Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                        Text("Önerilen Alış (Dip):", color = CyberCyan, fontSize = 11.sp, fontWeight = FontWeight.Bold, fontFamily = FontFamily.Monospace)
+                        Text("$${String.format(Locale.US, "%.2f", signal.suggestedEntryPrice)}", color = CyberCyan, fontSize = 12.sp, fontWeight = FontWeight.Black, fontFamily = FontFamily.Monospace)
+                    }
+                    Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                        Text("Hedef Satış (Kâr Al):", color = CyberEmerald, fontSize = 11.sp, fontWeight = FontWeight.Bold, fontFamily = FontFamily.Monospace)
+                        Text("$${String.format(Locale.US, "%.2f", signal.targetExitPrice)}", color = CyberEmerald, fontSize = 12.sp, fontWeight = FontWeight.Black, fontFamily = FontFamily.Monospace)
+                    }
+                    Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                        Text("Binance Öncülüğü:", color = TextTertiary, fontSize = 10.sp, fontFamily = FontFamily.Monospace)
+                        Text("%+${String.format(Locale.US, "%.2f", signal.binanceLeadPercent)} Yukarı", color = CyberEmerald, fontSize = 10.sp, fontWeight = FontWeight.Bold, fontFamily = FontFamily.Monospace)
+                    }
+                }
+            }
+
+            // Rationale / Reasoning
+            Text(
+                text = "💡 Analiz: ${signal.rationale}",
+                color = TextSecondary,
+                fontSize = 10.sp,
+                lineHeight = 14.sp
+            )
+
+            // Action Buttons
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                OutlinedButton(
+                    onClick = onCopyPrices,
+                    modifier = Modifier
+                        .weight(1f)
+                        .height(38.dp),
+                    shape = RoundedCornerShape(8.dp),
+                    colors = ButtonDefaults.outlinedButtonColors(contentColor = CyberCyan),
+                    border = androidx.compose.foundation.BorderStroke(1.dp, CyberCyan)
+                ) {
+                    Icon(imageVector = Icons.Default.ContentCopy, contentDescription = null, modifier = Modifier.size(14.dp))
+                    Spacer(modifier = Modifier.width(4.dp))
+                    Text(
+                        text = "Fiyatları Kopyala",
+                        fontSize = 10.sp,
+                        fontWeight = FontWeight.Bold,
+                        fontFamily = FontFamily.Monospace
+                    )
+                }
+
+                Button(
+                    onClick = onSelect,
+                    modifier = Modifier
+                        .weight(1.3f)
+                        .height(38.dp),
+                    shape = RoundedCornerShape(8.dp),
+                    colors = ButtonDefaults.buttonColors(
+                        containerColor = CyberEmerald,
+                        contentColor = Color.Black
+                    )
+                ) {
+                    Icon(imageVector = Icons.Default.Launch, contentDescription = null, modifier = Modifier.size(14.dp))
+                    Spacer(modifier = Modifier.width(4.dp))
+                    Text(
+                        text = "MİDAS'TA AÇ & GİR",
+                        fontSize = 11.sp,
+                        fontWeight = FontWeight.Black,
+                        fontFamily = FontFamily.Monospace
+                    )
+                }
+            }
+        }
+    }
+}
+
+@Composable
+fun FilterChipButton(
+    title: String,
+    selected: Boolean,
+    modifier: Modifier = Modifier,
+    onClick: () -> Unit
+) {
+    Surface(
+        modifier = modifier
+            .height(34.dp)
+            .clickable { onClick() },
+        color = if (selected) CyberEmerald else Color(0xFF0F1520),
+        shape = RoundedCornerShape(8.dp),
+        border = androidx.compose.foundation.BorderStroke(
+            1.dp,
+            if (selected) CyberEmerald else OledCardBorder
+        )
+    ) {
+        Box(contentAlignment = Alignment.Center, modifier = Modifier.padding(horizontal = 4.dp)) {
+            Text(
+                text = title,
+                color = if (selected) Color.Black else TextSecondary,
+                fontSize = 10.sp,
+                fontWeight = if (selected) FontWeight.Black else FontWeight.Bold,
+                fontFamily = FontFamily.Monospace
+            )
         }
     }
 }
