@@ -2775,13 +2775,31 @@ fun LiveSignalOpportunityCard(
                 }
             }
 
-            // Rationale / Reasoning
-            Text(
-                text = "💡 Analiz: ${signal.rationale}",
-                color = TextSecondary,
-                fontSize = 10.sp,
-                lineHeight = 14.sp
-            )
+            // Rationale / Reasoning with Gemini AI Badge
+            Surface(
+                modifier = Modifier.fillMaxWidth(),
+                color = if (isHighConfidence) CyberEmerald.copy(alpha = 0.08f) else Color(0xFF0F1522),
+                shape = RoundedCornerShape(8.dp),
+                border = androidx.compose.foundation.BorderStroke(0.6.dp, if (isHighConfidence) CyberEmerald.copy(alpha = 0.4f) else OledCardBorder)
+            ) {
+                Column(modifier = Modifier.padding(8.dp), verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                        Text(
+                            text = if (isHighConfidence) "🤖 GEMINI AI & GÖSTERGE RAPORU" else "💡 TEKNİK ANALİZ RAPORU",
+                            color = if (isHighConfidence) CyberEmerald else CyberCyan,
+                            fontSize = 9.5.sp,
+                            fontWeight = FontWeight.Black,
+                            fontFamily = FontFamily.Monospace
+                        )
+                    }
+                    Text(
+                        text = signal.rationale,
+                        color = Color.White.copy(alpha = 0.9f),
+                        fontSize = 10.5.sp,
+                        lineHeight = 14.5.sp
+                    )
+                }
+            }
 
             // Action Buttons
             Row(

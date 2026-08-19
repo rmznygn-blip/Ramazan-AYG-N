@@ -8,6 +8,9 @@ import android.content.Intent
 import android.media.AudioAttributes
 import android.media.RingtoneManager
 import android.os.Build
+import android.os.VibrationEffect
+import android.os.Vibrator
+import android.os.VibratorManager
 import androidx.core.app.NotificationCompat
 import com.example.MainActivity
 import com.example.R
@@ -97,10 +100,17 @@ object NotificationHelper {
         )
 
         val isSell = signal.actionType == "PROFIT_TAKE"
+        val isHighConfidence = signal.confidenceScore >= 0.90
+        if (isHighConfidence) {
+            vibrateForHighConfidence(context)
+        }
+
         val title = if (isSell) {
             "🔥 [MİDAS SATIŞ] ${signal.symbol} KÂR HEDEFİ GELDİ! (+%${String.format(Locale.US, "%.2f", signal.netProfitPercent)})"
         } else if (signal.actionType == "DCA_ADD") {
             "🛡️ [MİDAS KADEME] ${signal.symbol} DCA #${signal.dcaLevel} DİP ALIMI!"
+        } else if (isHighConfidence) {
+            "⭐ [%90+ YÜKSEK GÜVEN] ${signal.symbol} MİDAS DİP ALIMI!"
         } else {
             "⚡ [MİDAS ALIM] ${signal.symbol} 5Dk DESTEK SEKME SİNYALİ!"
         }
@@ -144,5 +154,32 @@ object NotificationHelper {
         val notificationManager = context.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
         val notificationId = NOTIFICATION_ID_SIGNAL_BASE + (signalId.toInt() % 100)
         notificationManager.cancel(notificationId)
+    }
+
+    fun vibrateForHighConfidence(context: Context) {
+        try {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+                val vibratorManager = context.getSystemService(Context.VIBRATOR_MANAGER_SERVICE) as? VibratorManager
+                val vibrator = vibratorManager?.defaultVibrator
+                val effect = VibrationEffect.createWaveform(
+                    longArrayOf(0, 180, 80, 220, 80, 260),
+                    intArrayOf(0, 200, 0, 255, 0, 255),
+                    -1
+                )
+                vibrator?.vibrate(effect)
+            } else {
+                @Suppress("DEPRECATION")
+                val vibrator = context.getSystemService(Context.VIBRATOR_SERVICE) as? Vibrator
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                    val effect = VibrationEffect.createWaveform(longArrayOf(0, 180, 80, 220, 80, 260), -1)
+                    vibrator?.vibrate(effect)
+                } else {
+                    @Suppress("DEPRECATION")
+                    vibrator?.vibrate(longArrayOf(0, 180, 80, 220, 80, 260), -1)
+                }
+            }
+        } catch (e: Throwable) {
+            // Graceful silent fallback if vibration not permitted on some devices
+        }
     }
 }

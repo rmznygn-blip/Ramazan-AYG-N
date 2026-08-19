@@ -291,7 +291,7 @@ class CryptoTraderRepository(context: Context) {
                         val allocated = (currentCash * (_traderSettings.value.cashAllocationPercent / 100.0)).toInt().coerceIn(10, currentCash.toInt()).toDouble()
                         val tech = techMap[candidate.symbol]
 
-                        val rationale = if (tech != null) {
+                        val baseRationale = if (tech != null) {
                             if (_traderSettings.value.isEveningSniperMode) {
                                 "🌙 Akşam Sniper Seansı: Dip Destek ($${String.format(Locale.US, "%.2f", tech.supportLevel)}) • RSI: ${String.format(Locale.US, "%.1f", tech.rsi14)} • Binance %+${String.format(Locale.US, "%.2f", candidate.leadLagDiffPercent)} Öncü"
                             } else {
@@ -301,12 +301,22 @@ class CryptoTraderRepository(context: Context) {
                             "Binance Global %+${String.format(Locale.US, "%.2f", candidate.leadLagDiffPercent)} önde. Komisyon korumalı kâr hedefi."
                         }
 
+                        val aiRationale = com.example.service.GeminiMarketAnalystService.analyzeTradeOpportunity(
+                            symbol = candidate.symbol,
+                            currentPrice = candidate.rawPrice,
+                            supportLevel = tech?.supportLevel ?: (candidate.rawPrice * 0.98),
+                            resistanceLevel = tech?.resistanceLevel ?: (candidate.rawPrice * 1.02),
+                            rsi14 = tech?.rsi14 ?: 50.0,
+                            binanceLeadPercent = candidate.leadLagDiffPercent,
+                            targetNetProfitPercent = _traderSettings.value.targetNetProfitPercent
+                        )
+
                         val signal = generateMidasOrderSignal(
                             symbol = candidate.symbol,
                             currentPrice = candidate.rawPrice,
                             investedAmount = allocated,
                             targetNetProfitPercent = _traderSettings.value.targetNetProfitPercent / 100.0,
-                            rationale = rationale
+                            rationale = if (aiRationale.isNotBlank()) aiRationale else baseRationale
                         )
                         val id = tradeDao.insertSignal(signal)
                         com.example.util.NotificationHelper.showTradeSignalNotification(appContext, signal.copy(id = id))
