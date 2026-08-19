@@ -5,25 +5,27 @@ import androidx.compose.material3.darkColorScheme
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.graphics.Color
 
-private val OledColorScheme = darkColorScheme(
-    primary = CyberEmerald,
+private val LuxuryDarkColorScheme = darkColorScheme(
+    primary = EmeraldProfit,
     onPrimary = Color.Black,
-    primaryContainer = Color(0xFF00381B),
-    onPrimaryContainer = CyberEmerald,
-    secondary = CyberCyan,
+    primaryContainer = EmeraldContainer,
+    onPrimaryContainer = EmeraldProfitBright,
+    secondary = IceCyanBright,
     onSecondary = Color.Black,
-    secondaryContainer = Color(0xFF00363A),
-    onSecondaryContainer = CyberCyan,
-    tertiary = CyberAmber,
+    secondaryContainer = IceCyanContainer,
+    onSecondaryContainer = IceCyanBright,
+    tertiary = GoldAccent,
     onTertiary = Color.Black,
-    background = OledBlack,
+    tertiaryContainer = GoldContainer,
+    onTertiaryContainer = GoldWarm,
+    background = ObsidianBg,
     onBackground = TextPrimary,
-    surface = OledSurface,
+    surface = ObsidianSurface,
     onSurface = TextPrimary,
-    surfaceVariant = OledCardSurface,
+    surfaceVariant = ObsidianCard,
     onSurfaceVariant = TextSecondary,
-    outline = OledCardBorder,
-    error = CyberCrimson,
+    outline = ObsidianBorder,
+    error = CoralRed,
     onError = Color.White
 )
 
@@ -32,7 +34,7 @@ fun MyApplicationTheme(
     content: @Composable () -> Unit
 ) {
     MaterialTheme(
-        colorScheme = OledColorScheme,
+        colorScheme = LuxuryDarkColorScheme,
         typography = Typography,
         content = content
     )

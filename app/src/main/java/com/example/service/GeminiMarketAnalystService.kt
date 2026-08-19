@@ -17,8 +17,8 @@ import java.util.Locale
 object GeminiMarketAnalystService {
 
     private const val TAG = "GeminiMarketAnalyst"
-    // gemini-3.5-flash as default text model per AI Studio guidelines
-    private const val MODEL_NAME = "gemini-3.5-flash"
+    // gemini-2.5-flash as default text model per AI Studio guidelines
+    private const val MODEL_NAME = "gemini-2.5-flash"
 
     // Cache of recent AI analyses to prevent redundant API calls
     private val analysisCache = mutableMapOf<String, Pair<Long, String>>()
@@ -30,7 +30,8 @@ object GeminiMarketAnalystService {
         resistanceLevel: Double,
         rsi14: Double,
         binanceLeadPercent: Double,
-        targetNetProfitPercent: Double
+        targetNetProfitPercent: Double,
+        coinWinRate: Double = 100.0
     ): String = withContext(Dispatchers.IO) {
         val cacheKey = "${symbol}_${String.format(Locale.US, "%.1f", currentPrice)}"
         val cached = analysisCache[cacheKey]
@@ -48,16 +49,17 @@ object GeminiMarketAnalystService {
         if (apiKey.isNotBlank() && apiKey != "MY_GEMINI_API_KEY" && !apiKey.contains("PLACEHOLDER")) {
             try {
                 val prompt = """
-                    Sen Midas Kripto ve Binance Global arbitrajı konusunda uzman bir Türk teknik analiz yapay zekasısın.
-                    Aşağıdaki 5 dakikalık canlı kripto verisini incele ve Midas'ta alım yapacak bir kullanıcıya yönelik 1-2 cümlelik çok net, profesyonel bir teknik gerekçe ve hedef özeti yaz (Türkçe olsun, gereksiz laf kalabalığı yapma):
+                    Sen Midas Kripto (USDT) ve Binance Global arbitraj/teknik analizi konusunda uzman, kendini geliştiren bir Türk teknik analiz yapay zekasısın.
+                    Aşağıdaki 5 dakikalık canlı kripto verisini ve geçmiş başarı hafızasını incele. Midas'ta USDT ile manuel limit emir girecek kullanıcıya yönelik 1-2 cümlelik çok net, profesyonel bir teknik gerekçe ve hedef özeti yaz (Türkçe olsun, gereksiz laf kalabalığı yapma, doğrudan sonuca odaklan):
                     
-                    - Coin: $symbol/USDT (Midas Kripto)
-                    - Anlık Fiyat: $$currentPrice
-                    - 5Dk Dip Destek Seviyesi: $$supportLevel
-                    - 5Dk Tepe Direnç Seviyesi: $$resistanceLevel
+                    - İşlem Çifti: $symbol/USDT (Midas Kripto)
+                    - Anlık Fiyat: $$currentPrice USDT
+                    - 5Dk Dip Destek Seviyesi: $$supportLevel USDT
+                    - 5Dk Tepe Direnç Seviyesi: $$resistanceLevel USDT
                     - RSI (14, 5m): $rsi14
                     - Binance Global Öncülük Farkı: %+$binanceLeadPercent (Binance yukarı öncülük ediyor)
-                    - Hedef Net Kâr: %+$targetNetProfitPercent
+                    - Midas Komisyonu Düşülmüş Net Hedef: %+$targetNetProfitPercent
+                    - Bu Coindeki Geçmiş Kazanma Oranı: %$coinWinRate
                 """.trimIndent()
 
                 val jsonBody = JSONObject().apply {
@@ -114,21 +116,21 @@ object GeminiMarketAnalystService {
             }
         }
 
-        // High-precision algorithmic AI fallback
+        // High-precision algorithmic AI fallback with memory context
         val rsiText = when {
-            rsi14 <= 32.0 -> "RSI 14 ($rsi14) derin aşırı satım bölgesinde"
-            rsi14 <= 42.0 -> "RSI 14 ($rsi14) dip destek dönüşünde"
-            rsi14 <= 55.0 -> "RSI 14 ($rsi14) dengeli yükseliş momentumunda"
-            else -> "RSI 14 ($rsi14) alıcı baskısıyla"
+            rsi14 <= 32.0 -> "RSI ($rsi14) derin aşırı satım bölgesinde"
+            rsi14 <= 42.0 -> "RSI ($rsi14) 5dk dip destek dönüşünde"
+            rsi14 <= 55.0 -> "RSI ($rsi14) dengeli yükseliş momentumunda"
+            else -> "RSI ($rsi14) alıcı baskısıyla"
         }
 
         val spreadText = if (binanceLeadPercent >= 0.8) {
             "Binance Global %+${String.format(Locale.US, "%.2f", binanceLeadPercent)} farkla yukarı yönlü güçlü likidite öncülüğü yapıyor"
         } else {
-            "Binance %+${String.format(Locale.US, "%.2f", binanceLeadPercent)} öncü spread ile Midas fiyatını yukarı çekiyor"
+            "Binance %+${String.format(Locale.US, "%.2f", binanceLeadPercent)} öncü spread ile Midas USDT fiyatını yukarı çekiyor"
         }
 
-        val fallback = "$symbol, $rsiText. $spreadText. $${String.format(Locale.US, "%.2f", supportLevel)} desteğinden $${String.format(Locale.US, "%.2f", resistanceLevel)} hedefine komisyon korumalı net +%${String.format(Locale.US, "%.2f", targetNetProfitPercent)} kâr potansiyeli."
+        val fallback = "$symbol/USDT, $rsiText. $spreadText. $${String.format(Locale.US, "%.2f", supportLevel)} desteğinden $${String.format(Locale.US, "%.2f", resistanceLevel)} hedefine komisyon korumalı net +%${String.format(Locale.US, "%.2f", targetNetProfitPercent)} kâr potansiyeli."
         analysisCache[cacheKey] = Pair(now, fallback)
         return@withContext fallback
     }

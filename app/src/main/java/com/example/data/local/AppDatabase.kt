@@ -7,16 +7,17 @@ import androidx.room.RoomDatabase
 
 @Database(
     entities = [
-        TradeSignalEntity::class,
-        DcaPositionEntity::class,
-        LearningMetricEntity::class
+        AppTradeEntity::class,
+        CapitalProfileEntity::class,
+        WeeklyReportEntity::class,
+        CoinMemoryEntity::class
     ],
-    version = 1,
+    version = 2,
     exportSchema = false
 )
 abstract class AppDatabase : RoomDatabase() {
 
-    abstract fun tradeDao(): TradeDao
+    abstract fun appDao(): AppDatabaseDao
 
     companion object {
         @Volatile
@@ -27,7 +28,7 @@ abstract class AppDatabase : RoomDatabase() {
                 val instance = Room.databaseBuilder(
                     context.applicationContext,
                     AppDatabase::class.java,
-                    "crypto_trader_database"
+                    "crypto_analyst_master_db"
                 )
                     .fallbackToDestructiveMigration()
                     .build()

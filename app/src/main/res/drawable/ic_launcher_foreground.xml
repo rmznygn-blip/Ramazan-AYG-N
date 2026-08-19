@@ -1,50 +1,69 @@
 <?xml version="1.0" encoding="utf-8"?>
 <vector xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:aapt="http://schemas.android.com/aapt"
     android:width="108dp"
     android:height="108dp"
     android:viewportWidth="108"
     android:viewportHeight="108">
     <group>
-        <!-- Floating HUD Outer Rounded Frame -->
+        <!-- Outer Glowing Glassmorphic Shield / Emblem Base -->
         <path
-            android:fillColor="#2200E676"
-            android:strokeColor="#00E676"
-            android:strokeWidth="2.5"
-            android:pathData="M 32,28 L 76,28 A 8,8 0 0,1 84,36 L 84,72 A 8,8 0 0,1 76,80 L 32,80 A 8,8 0 0,1 24,72 L 24,36 A 8,8 0 0,1 32,28 Z" />
+            android:fillColor="#1510B981"
+            android:strokeColor="#3538BDF8"
+            android:strokeWidth="1.8"
+            android:pathData="M 54,22 L 80,34 L 80,62 C 80,76 68,86 54,90 C 40,86 28,76 28,62 L 28,34 Z" />
 
-        <!-- Candlestick 1 (Bullish green) -->
+        <!-- Candlestick 1: Left Dip Support (Cyan) -->
         <path
-            android:fillColor="#00E676"
-            android:pathData="M 37,44 L 43,44 L 43,62 L 37,62 Z" />
-        <path
-            android:strokeColor="#00E676"
+            android:strokeColor="#38BDF8"
             android:strokeWidth="1.5"
-            android:pathData="M 40,38 L 40,68" />
+            android:pathData="M 40,46 L 40,74" />
+        <path
+            android:fillColor="#0284C7"
+            android:strokeColor="#38BDF8"
+            android:strokeWidth="1.2"
+            android:pathData="M 37,52 L 43,52 L 43,68 L 37,68 Z" />
 
-        <!-- Candlestick 2 (Bullish gold) -->
+        <!-- Candlestick 2: Center Consolidation (Gold / Amber) -->
         <path
-            android:fillColor="#FFD700"
-            android:pathData="M 51,38 L 57,38 L 57,56 L 51,56 Z" />
-        <path
-            android:strokeColor="#FFD700"
+            android:strokeColor="#F59E0B"
             android:strokeWidth="1.5"
-            android:pathData="M 54,32 L 54,62" />
+            android:pathData="M 54,38 L 54,70" />
+        <path
+            android:fillColor="#D97706"
+            android:strokeColor="#FBBF24"
+            android:strokeWidth="1.2"
+            android:pathData="M 51,44 L 57,44 L 57,62 L 51,62 Z" />
 
-        <!-- Candlestick 3 (Cyber cyan) -->
+        <!-- Candlestick 3: Right Massive Bullish Breakout (Emerald Profit) -->
         <path
-            android:fillColor="#00E5FF"
-            android:pathData="M 65,34 L 71,34 L 71,48 L 65,48 Z" />
-        <path
-            android:strokeColor="#00E5FF"
+            android:strokeColor="#10B981"
             android:strokeWidth="1.5"
-            android:pathData="M 68,30 L 68,54" />
+            android:pathData="M 68,30 L 68,64" />
+        <path
+            android:fillColor="#059669"
+            android:strokeColor="#34D399"
+            android:strokeWidth="1.2"
+            android:pathData="M 65,34 L 71,34 L 71,54 L 65,54 Z" />
 
-        <!-- Trend Line -->
+        <!-- Ascending Exponential Profit Trendline (Glow White to Gold) -->
         <path
             android:strokeColor="#FFFFFF"
-            android:strokeWidth="2"
+            android:strokeWidth="2.5"
             android:strokeLineCap="round"
             android:strokeLineJoin="round"
-            android:pathData="M 30,64 L 42,50 L 54,44 L 78,34" />
+            android:pathData="M 34,68 L 44,56 L 54,48 L 74,28" />
+
+        <!-- Bullish Rocket / Target Arrow at the tip -->
+        <path
+            android:fillColor="#10B981"
+            android:strokeColor="#FFFFFF"
+            android:strokeWidth="1.2"
+            android:pathData="M 74,28 L 67,28 L 74,35 Z" />
+
+        <!-- Glowing Star / Profit Sparkle at apex -->
+        <path
+            android:fillColor="#FBBF24"
+            android:pathData="M 76,26 L 77,29 L 80,30 L 77,31 L 76,34 L 75,31 L 72,30 L 75,29 Z" />
     </group>
 </vector>
