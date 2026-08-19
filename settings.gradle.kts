@@ -22,6 +22,6 @@ dependencyResolutionManagement {
   }
 }
 
-rootProject.name = "Crypto Overlay"
+rootProject.name = "Kripto Analist"
 
 include(":app")

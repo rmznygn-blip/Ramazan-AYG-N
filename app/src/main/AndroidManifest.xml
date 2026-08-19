@@ -2,27 +2,7 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android"
     xmlns:tools="http://schemas.android.com/tools">
 
-    <!-- Permissions required for Floating Window & Accessibility -->
-    <uses-permission android:name="android.permission.SYSTEM_ALERT_WINDOW" />
-    <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
-    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_SPECIAL_USE" />
-    <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
-    <uses-permission android:name="android.permission.VIBRATE" />
     <uses-permission android:name="android.permission.INTERNET" />
-    <uses-permission android:name="android.permission.WAKE_LOCK" />
-    <uses-permission android:name="android.permission.REQUEST_IGNORE_BATTERY_OPTIMIZATIONS" />
-
-    <!-- Package Visibility Queries for Midas App Integration -->
-    <queries>
-        <package android:name="com.getmidas.app" />
-        <package android:name="com.getmidas.android" />
-        <package android:name="com.midas.app" />
-        <package android:name="com.midas.investment" />
-        <package android:name="tr.com.midas.app" />
-        <intent>
-            <action android:name="android.intent.action.MAIN" />
-        </intent>
-    </queries>
 
     <application
         android:allowBackup="true"
@@ -46,36 +26,6 @@
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
         </activity>
-
-        <!-- Floating Overlay Window Service -->
-        <service
-            android:name=".service.FloatingOverlayService"
-            android:enabled="true"
-            android:exported="false"
-            android:foregroundServiceType="specialUse">
-            <property
-                android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE"
-                android:value="Floating crypto telemetry overlay" />
-        </service>
-
-        <!-- Crypto Screen Reader Accessibility Service -->
-        <service
-            android:name=".service.CryptoAccessibilityService"
-            android:exported="true"
-            android:label="@string/accessibility_service_label"
-            android:permission="android.permission.BIND_ACCESSIBILITY_SERVICE">
-            <intent-filter>
-                <action android:name="android.accessibilityservice.AccessibilityService" />
-            </intent-filter>
-            <meta-data
-                android:name="android.accessibilityservice"
-                android:resource="@xml/crypto_accessibility_service" />
-        </service>
-
-        <!-- Direct Notification Action Receiver -->
-        <receiver
-            android:name=".receiver.TradeActionReceiver"
-            android:exported="false" />
 
     </application>
 

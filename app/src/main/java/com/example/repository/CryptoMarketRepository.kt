@@ -1,10 +1,11 @@
 package com.example.repository
 
+import com.example.engine.TechnicalAnalysisEngine
 import com.example.model.BinanceOracleData
+import com.example.model.CandleStick
 import com.example.model.CryptoAsset
-import com.example.model.MidasAccountState
-import com.example.model.OverlayConfig
-import com.example.model.ScreenReaderLog
+import com.example.model.TechnicalAnalysis5m
+import com.example.service.GeminiMarketAnalystService
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -12,7 +13,6 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
-import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -21,11 +21,9 @@ import java.io.BufferedReader
 import java.io.InputStreamReader
 import java.net.HttpURLConnection
 import java.net.URL
-import java.text.SimpleDateFormat
-import java.util.Date
 import java.util.Locale
 
-object CryptoOverlayRepository {
+object CryptoMarketRepository {
 
     private val repositoryScope = CoroutineScope(Dispatchers.Default)
     private var livePriceJob: Job? = null
@@ -34,110 +32,35 @@ object CryptoOverlayRepository {
     val MONITORED_SYMBOLS = listOf("SOL", "BTC", "ETH", "AVAX", "XRP", "DOGE", "PEPE", "SUI")
 
     private val initialAssets = listOf(
-        CryptoAsset(
-            id = "SOL",
-            symbol = "SOL",
-            name = "Solana",
-            priceFormatted = "$0.00",
-            rawPrice = 0.0,
-            currencySymbol = "$",
-            changePercent = 0.0,
-            changeFormatted = "0.00%",
-            isPositive = true,
-            sparklinePoints = listOf(50f, 50f, 50f, 50f, 50f),
-            sourceApp = "Midas Kripto",
-            binanceReferencePrice = 0.0,
-            leadLagDiffPercent = 0.0
-        ),
-        CryptoAsset(
-            id = "BTC",
-            symbol = "BTC",
-            name = "Bitcoin",
-            priceFormatted = "$0.00",
-            rawPrice = 0.0,
-            currencySymbol = "$",
-            changePercent = 0.0,
-            changeFormatted = "0.00%",
-            isPositive = true,
-            sparklinePoints = listOf(50f, 50f, 50f, 50f, 50f),
-            sourceApp = "Midas Kripto",
-            binanceReferencePrice = 0.0,
-            leadLagDiffPercent = 0.0
-        ),
-        CryptoAsset(
-            id = "ETH",
-            symbol = "ETH",
-            name = "Ethereum",
-            priceFormatted = "$0.00",
-            rawPrice = 0.0,
-            currencySymbol = "$",
-            changePercent = 0.0,
-            changeFormatted = "0.00%",
-            isPositive = true,
-            sparklinePoints = listOf(50f, 50f, 50f, 50f, 50f),
-            sourceApp = "Midas Kripto",
-            binanceReferencePrice = 0.0,
-            leadLagDiffPercent = 0.0
-        ),
-        CryptoAsset(
-            id = "AVAX",
-            symbol = "AVAX",
-            name = "Avalanche",
-            priceFormatted = "$0.00",
-            rawPrice = 0.0,
-            currencySymbol = "$",
-            changePercent = 0.0,
-            changeFormatted = "0.00%",
-            isPositive = true,
-            sparklinePoints = listOf(50f, 50f, 50f, 50f, 50f),
-            sourceApp = "Midas Kripto",
-            binanceReferencePrice = 0.0,
-            leadLagDiffPercent = 0.0
-        )
+        CryptoAsset(id = "SOL", symbol = "SOL", name = "Solana", priceFormatted = "$0.00", rawPrice = 0.0, currencySymbol = "$", changePercent = 0.0, changeFormatted = "0.00%", isPositive = true, sparklinePoints = listOf(50f, 50f, 50f, 50f, 50f), sourceApp = "Midas Kripto", binanceReferencePrice = 0.0, leadLagDiffPercent = 0.0),
+        CryptoAsset(id = "BTC", symbol = "BTC", name = "Bitcoin", priceFormatted = "$0.00", rawPrice = 0.0, currencySymbol = "$", changePercent = 0.0, changeFormatted = "0.00%", isPositive = true, sparklinePoints = listOf(50f, 50f, 50f, 50f, 50f), sourceApp = "Midas Kripto", binanceReferencePrice = 0.0, leadLagDiffPercent = 0.0),
+        CryptoAsset(id = "ETH", symbol = "ETH", name = "Ethereum", priceFormatted = "$0.00", rawPrice = 0.0, currencySymbol = "$", changePercent = 0.0, changeFormatted = "0.00%", isPositive = true, sparklinePoints = listOf(50f, 50f, 50f, 50f, 50f), sourceApp = "Midas Kripto", binanceReferencePrice = 0.0, leadLagDiffPercent = 0.0),
+        CryptoAsset(id = "AVAX", symbol = "AVAX", name = "Avalanche", priceFormatted = "$0.00", rawPrice = 0.0, currencySymbol = "$", changePercent = 0.0, changeFormatted = "0.00%", isPositive = true, sparklinePoints = listOf(50f, 50f, 50f, 50f, 50f), sourceApp = "Midas Kripto", binanceReferencePrice = 0.0, leadLagDiffPercent = 0.0),
+        CryptoAsset(id = "XRP", symbol = "XRP", name = "Ripple", priceFormatted = "$0.00", rawPrice = 0.0, currencySymbol = "$", changePercent = 0.0, changeFormatted = "0.00%", isPositive = true, sparklinePoints = listOf(50f, 50f, 50f, 50f, 50f), sourceApp = "Midas Kripto", binanceReferencePrice = 0.0, leadLagDiffPercent = 0.0),
+        CryptoAsset(id = "DOGE", symbol = "DOGE", name = "Dogecoin", priceFormatted = "$0.00", rawPrice = 0.0, currencySymbol = "$", changePercent = 0.0, changeFormatted = "0.00%", isPositive = true, sparklinePoints = listOf(50f, 50f, 50f, 50f, 50f), sourceApp = "Midas Kripto", binanceReferencePrice = 0.0, leadLagDiffPercent = 0.0),
+        CryptoAsset(id = "PEPE", symbol = "PEPE", name = "Pepe", priceFormatted = "$0.00", rawPrice = 0.0, currencySymbol = "$", changePercent = 0.0, changeFormatted = "0.00%", isPositive = true, sparklinePoints = listOf(50f, 50f, 50f, 50f, 50f), sourceApp = "Midas Kripto", binanceReferencePrice = 0.0, leadLagDiffPercent = 0.0),
+        CryptoAsset(id = "SUI", symbol = "SUI", name = "Sui", priceFormatted = "$0.00", rawPrice = 0.0, currencySymbol = "$", changePercent = 0.0, changeFormatted = "0.00%", isPositive = true, sparklinePoints = listOf(50f, 50f, 50f, 50f, 50f), sourceApp = "Midas Kripto", binanceReferencePrice = 0.0, leadLagDiffPercent = 0.0)
     )
 
     private val _cryptoAssets = MutableStateFlow<List<CryptoAsset>>(initialAssets)
     val cryptoAssets: StateFlow<List<CryptoAsset>> = _cryptoAssets.asStateFlow()
 
-    private val _midasAccountState = MutableStateFlow(
-        MidasAccountState(
-            availableCash = 0.00,
-            currencySymbol = "$",
-            isCashDetectedFromScreen = false,
-            currentViewedSymbol = "SOL"
-        )
-    )
-    val midasAccountState: StateFlow<MidasAccountState> = _midasAccountState.asStateFlow()
-
     private val _binanceOracleMap = MutableStateFlow<Map<String, BinanceOracleData>>(emptyMap())
     val binanceOracleMap: StateFlow<Map<String, BinanceOracleData>> = _binanceOracleMap.asStateFlow()
 
-    private val _technicalAnalysisMap = MutableStateFlow<Map<String, com.example.model.TechnicalAnalysis5m>>(emptyMap())
-    val technicalAnalysisMap: StateFlow<Map<String, com.example.model.TechnicalAnalysis5m>> = _technicalAnalysisMap.asStateFlow()
+    private val _technicalAnalysisMap = MutableStateFlow<Map<String, TechnicalAnalysis5m>>(emptyMap())
+    val technicalAnalysisMap: StateFlow<Map<String, TechnicalAnalysis5m>> = _technicalAnalysisMap.asStateFlow()
 
-    private val _overlayConfig = MutableStateFlow(OverlayConfig())
-    val overlayConfig: StateFlow<OverlayConfig> = _overlayConfig.asStateFlow()
+    private val _isRefreshing = MutableStateFlow(false)
+    val isRefreshing: StateFlow<Boolean> = _isRefreshing.asStateFlow()
 
-    private val _screenLogs = MutableStateFlow<List<ScreenReaderLog>>(emptyList())
-    val screenLogs: StateFlow<List<ScreenReaderLog>> = _screenLogs.asStateFlow()
-
-    private val _isOverlayRunning = MutableStateFlow(false)
-    val isOverlayRunning: StateFlow<Boolean> = _isOverlayRunning.asStateFlow()
-
-    private val _isAccessibilityConnected = MutableStateFlow(false)
-    val isAccessibilityConnected: StateFlow<Boolean> = _isAccessibilityConnected.asStateFlow()
-
-    // 100% Real Trading Mode (Simulation completely disabled for pure production)
-    private val _isSimulationActive = MutableStateFlow(false)
-    val isSimulationActive: StateFlow<Boolean> = _isSimulationActive.asStateFlow()
+    private val _lastRefreshTime = MutableStateFlow(System.currentTimeMillis())
+    val lastRefreshTime: StateFlow<Long> = _lastRefreshTime.asStateFlow()
 
     init {
         startRealMarketDataEngine()
     }
 
-    /**
-     * Continuous Real-time Binance Public API & Lead-Lag Polling Engine
-     */
     fun startRealMarketDataEngine() {
         livePriceJob?.cancel()
         livePriceJob = repositoryScope.launch {
@@ -145,16 +68,32 @@ object CryptoOverlayRepository {
                 try {
                     fetchRealBinancePrices()
                     fetchTechnicalCandles()
+                    _lastRefreshTime.value = System.currentTimeMillis()
                 } catch (e: Exception) {
-                    // Fail gracefully on transient network interruptions
+                    // Graceful error handling
                 }
-                delay(2000) // Fast 2-second real-time market refresh
+                delay(3000) // Continuous 3-second market update
+            }
+        }
+    }
+
+    fun refreshManually() {
+        repositoryScope.launch {
+            _isRefreshing.value = true
+            try {
+                fetchRealBinancePrices()
+                fetchTechnicalCandles()
+                _lastRefreshTime.value = System.currentTimeMillis()
+            } catch (e: Exception) {
+                // ignore
+            } finally {
+                _isRefreshing.value = false
             }
         }
     }
 
     private suspend fun fetchRealBinancePrices() = withContext(Dispatchers.IO) {
-        val pairs = listOf("SOLUSDT", "BTCUSDT", "ETHUSDT", "AVAXUSDT", "XRPUSDT", "DOGEUSDT", "PEPEUSDT", "SUIUSDT")
+        val pairs = MONITORED_SYMBOLS.map { "${it}USDT" }
         val pairsParam = pairs.joinToString(prefix = "[\"", separator = "\",\"", postfix = "\"]")
         val urlString = "https://api.binance.com/api/v3/ticker/24hr?symbols=$pairsParam"
 
@@ -162,8 +101,8 @@ object CryptoOverlayRepository {
             val url = URL(urlString)
             val conn = url.openConnection() as HttpURLConnection
             conn.requestMethod = "GET"
-            conn.connectTimeout = 3000
-            conn.readTimeout = 3000
+            conn.connectTimeout = 3500
+            conn.readTimeout = 3500
 
             if (conn.responseCode == 200) {
                 val reader = BufferedReader(InputStreamReader(conn.inputStream))
@@ -231,13 +170,13 @@ object CryptoOverlayRepository {
             }
             conn.disconnect()
         } catch (e: Exception) {
-            // Keep existing prices on connection drop
+            // Keep existing state on transient drops
         }
     }
 
     private suspend fun fetchTechnicalCandles() = withContext(Dispatchers.IO) {
-        val analysisResults = mutableMapOf<String, com.example.model.TechnicalAnalysis5m>()
-        val symbolsToAnalyze = listOf("SOL", "BTC", "ETH", "AVAX")
+        val analysisResults = mutableMapOf<String, TechnicalAnalysis5m>()
+        val symbolsToAnalyze = listOf("SOL", "BTC", "ETH", "AVAX", "XRP", "DOGE", "SUI")
 
         for (symbol in symbolsToAnalyze) {
             try {
@@ -252,12 +191,12 @@ object CryptoOverlayRepository {
                     reader.close()
 
                     val rawArray = JSONArray(response)
-                    val candleList = mutableListOf<com.example.model.CandleStick>()
+                    val candleList = mutableListOf<CandleStick>()
 
                     for (i in 0 until rawArray.length()) {
                         val c = rawArray.getJSONArray(i)
                         candleList.add(
-                            com.example.model.CandleStick(
+                            CandleStick(
                                 openTime = c.getLong(0),
                                 open = c.getString(1).toDouble(),
                                 high = c.getString(2).toDouble(),
@@ -272,7 +211,7 @@ object CryptoOverlayRepository {
                     val oracle = _binanceOracleMap.value[symbol]
                     val spread = oracle?.leadLagSpreadPercent ?: 0.0
 
-                    val analysis = com.example.engine.TechnicalAnalysisEngine.analyze5mCandles(
+                    val analysis = TechnicalAnalysisEngine.analyze5mCandles(
                         symbol = symbol,
                         candles = candleList,
                         leadLagSpreadPercent = spread
@@ -281,75 +220,27 @@ object CryptoOverlayRepository {
                 }
                 conn.disconnect()
             } catch (e: Exception) {
-                // Ignore individual symbol network errors
+                // Ignore individual symbol network error
             }
         }
 
         _technicalAnalysisMap.value = analysisResults
     }
 
-    fun updateOverlayRunning(running: Boolean) {
-        _isOverlayRunning.value = running
-    }
+    suspend fun getAiMarketAnalysis(symbol: String): String {
+        val asset = _cryptoAssets.value.firstOrNull { it.symbol.equals(symbol, ignoreCase = true) }
+        val price = asset?.rawPrice ?: 0.0
+        val tech = _technicalAnalysisMap.value[symbol]
+        val oracle = _binanceOracleMap.value[symbol]
 
-    fun updateAccessibilityConnected(connected: Boolean) {
-        _isAccessibilityConnected.value = connected
-    }
-
-    fun updateConfig(config: OverlayConfig) {
-        _overlayConfig.value = config
-    }
-
-    fun updateConfig(transform: (OverlayConfig) -> OverlayConfig) {
-        _overlayConfig.update(transform)
-    }
-
-    fun updateMidasCash(cash: Double, currency: String = "$", fromScreen: Boolean = true) {
-        if (cash < 0) return
-        _midasAccountState.update { current ->
-            current.copy(
-                availableCash = cash,
-                currencySymbol = currency,
-                isCashDetectedFromScreen = fromScreen,
-                lastDetectedTimestamp = System.currentTimeMillis()
-            )
-        }
-    }
-
-    fun updateViewedSymbol(symbol: String) {
-        _midasAccountState.update { it.copy(currentViewedSymbol = symbol) }
-    }
-
-    fun addExtractedAssets(
-        assets: List<CryptoAsset>,
-        rawText: String,
-        sourcePackage: String,
-        detectedCash: Double? = null
-    ) {
-        if (assets.isNotEmpty()) {
-            val currentMap = _cryptoAssets.value.associateBy { it.symbol }.toMutableMap()
-            assets.forEach { incoming ->
-                currentMap[incoming.symbol] = incoming
-            }
-            _cryptoAssets.value = currentMap.values.toList()
-            updateViewedSymbol(assets.first().symbol)
-        }
-
-        if (detectedCash != null && detectedCash > 0) {
-            updateMidasCash(detectedCash, fromScreen = true)
-        }
-
-        val timeFormat = SimpleDateFormat("HH:mm:ss", Locale.getDefault())
-        val log = ScreenReaderLog(
-            timestamp = timeFormat.format(Date()),
-            sourcePackage = sourcePackage,
-            rawTextExtracted = rawText.take(120),
-            detectedSymbols = assets.map { it.symbol },
-            parsedPriceCount = assets.size,
-            detectedCash = detectedCash
+        return GeminiMarketAnalystService.analyzeTradeOpportunity(
+            symbol = symbol,
+            currentPrice = price,
+            supportLevel = tech?.supportLevel ?: (price * 0.98),
+            resistanceLevel = tech?.resistanceLevel ?: (price * 1.02),
+            rsi14 = tech?.rsi14 ?: 50.0,
+            binanceLeadPercent = oracle?.leadLagSpreadPercent ?: 0.0,
+            targetNetProfitPercent = 2.0
         )
-        _screenLogs.update { current ->
-            (listOf(log) + current).take(25)
-        }
     }
 }

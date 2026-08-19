@@ -1,6 +1,6 @@
 {
-  "name": "Crypto Overlay",
-  "description": "OLED True Black Floating Overlay & Accessibility Service for Crypto Apps",
+  "name": "Kripto Analist",
+  "description": "Canlı Kripto Teknik Analiz, 5Dk RSI/Destek-Direnç ve Gösterge Raporu",
   "requestFramePermissions": [],
   "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
 }

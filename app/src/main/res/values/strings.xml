@@ -1,5 +1,3 @@
 <resources>
-    <string name="app_name">Crypto Overlay</string>
-    <string name="accessibility_service_label">Crypto Screen Reader</string>
-    <string name="accessibility_service_description">Reads screen values on crypto apps to display real-time floating analytics and prices.</string>
+    <string name="app_name">Kripto Analist</string>
 </resources>
