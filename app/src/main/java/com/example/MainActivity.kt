@@ -2478,13 +2478,22 @@ fun LiveSignalPickerSection(
     onSelectSignal: (LiveRankedSignal) -> Unit
 ) {
     var sortMode by remember { mutableIntStateOf(0) } // 0: Güvenilirlik, 1: Kâr Oranı, 2: En Güncel
+    var selectedCoinFilter by remember { mutableStateOf("ALL") }
+    var onlyHighConfidence by remember { mutableStateOf(false) }
     val context = LocalContext.current
 
-    val sortedList = remember(rankedSignals, sortMode) {
+    val sortedList = remember(rankedSignals, sortMode, selectedCoinFilter, onlyHighConfidence) {
+        var list = rankedSignals
+        if (selectedCoinFilter != "ALL") {
+            list = list.filter { it.symbol.equals(selectedCoinFilter, ignoreCase = true) }
+        }
+        if (onlyHighConfidence) {
+            list = list.filter { it.confidenceScorePercent >= 80 }
+        }
         when (sortMode) {
-            0 -> rankedSignals.sortedByDescending { it.confidenceScorePercent }
-            1 -> rankedSignals.sortedByDescending { it.netProfitPercent }
-            else -> rankedSignals.sortedByDescending { it.timestamp }
+            0 -> list.sortedByDescending { it.confidenceScorePercent }
+            1 -> list.sortedByDescending { it.netProfitPercent }
+            else -> list.sortedByDescending { it.timestamp }
         }
     }
 
@@ -2526,6 +2535,35 @@ fun LiveSignalPickerSection(
                     fontFamily = FontFamily.Monospace,
                     modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
                 )
+            }
+        }
+
+        // Quick Coin Filter Chips
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(5.dp)
+        ) {
+            listOf("ALL" to "Tümü", "SOL" to "SOL", "BTC" to "BTC", "ETH" to "ETH", "AVAX" to "AVAX", "XRP" to "XRP").forEach { (code, label) ->
+                val isSelected = selectedCoinFilter == code
+                Surface(
+                    modifier = Modifier
+                        .weight(1f)
+                        .height(28.dp)
+                        .clickable { selectedCoinFilter = code },
+                    color = if (isSelected) CyberCyan else Color(0xFF101622),
+                    shape = RoundedCornerShape(6.dp),
+                    border = androidx.compose.foundation.BorderStroke(1.dp, if (isSelected) CyberCyan else OledCardBorder)
+                ) {
+                    Box(contentAlignment = Alignment.Center) {
+                        Text(
+                            text = label,
+                            color = if (isSelected) Color.Black else TextSecondary,
+                            fontSize = 10.sp,
+                            fontWeight = if (isSelected) FontWeight.Black else FontWeight.Bold,
+                            fontFamily = FontFamily.Monospace
+                        )
+                    }
+                }
             }
         }
 
