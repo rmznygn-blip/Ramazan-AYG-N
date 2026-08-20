@@ -63,18 +63,32 @@ object AiAdvisorEngine {
             val pnlUsdt = (currentPrice - trade.entryPrice) * trade.coinAmount - trade.midasTotalFeeUsdt
             val pnlPercent = if (trade.investedUsdt > 0) (pnlUsdt / trade.investedUsdt) * 100.0 else 0.0
             val isTargetHit = currentPrice >= trade.targetExitPrice
+            val isPumpingAboveTarget = currentPrice > trade.targetExitPrice * 1.005
 
             if (isTargetHit) {
+                val actionTitle = if (isPumpingAboveTarget) "🔥 FİYAT HEDEFİ AŞTI: ${trade.symbol}/USDT" else "🎯 HEDEF SATIŞ FİYATINA ULAŞILDI!"
+                val step1Text = if (isPumpingAboveTarget) {
+                    "1. Güncel fiyat ($${String.format(Locale.US, "%.2f", currentPrice)}), ilk planlanan $${String.format(Locale.US, "%.2f", trade.targetExitPrice)} USDT hedefinin çok üzerine çıktı (+%${String.format(Locale.US, "%.2f", pnlPercent)} Net Kâr)."
+                } else {
+                    "1. ${trade.symbol}/USDT anlık fiyatı ($${String.format(Locale.US, "%.2f", currentPrice)}), belirlediğimiz $${String.format(Locale.US, "%.2f", trade.targetExitPrice)} USDT hedef satışını geçti!"
+                }
+                val step2Text = if (isPumpingAboveTarget) {
+                    "2. Coin hâlâ elinizdeyse Midas'ta anlık piyasa fiyatından ($${String.format(Locale.US, "%.2f", currentPrice)}) hemen satabilir veya hedefi daha yukarı güncelleyebilirsiniz."
+                } else {
+                    "2. Midas hesabınızı kontrol edin: $${String.format(Locale.US, "%.2f", trade.targetExitPrice)} USDT limit satış emrinizin gerçekleşip gerçekleşmediğine bakın."
+                }
+
                 return ActionGuidance(
-                    title = "🎯 HEDEF SATIŞ FİYATINA ULAŞILDI!",
+                    title = actionTitle,
                     statusBadge = "KÂR REALİZASYONU (+%${String.format(Locale.US, "%.2f", pnlPercent)} NET)",
                     statusColorHex = 0xFF00FF9D,
-                    step1 = "1. ${trade.symbol}/USDT anlık fiyatı ($${String.format(Locale.US, "%.2f", currentPrice)}), belirlediğimiz $${String.format(Locale.US, "%.2f", trade.targetExitPrice)} USDT hedef satışını geçti!",
-                    step2 = "2. Midas hesabınızı kontrol edin: $${String.format(Locale.US, "%.2f", trade.targetExitPrice)} USDT limit satış emriniz gerçekleşmiştir.",
-                    step3 = "3. Aşağıdaki 'Satıldı & Kapat (Kârı Kasaya Al)' butonuna basarak kasanızı güncelleyin.",
+                    step1 = step1Text,
+                    step2 = step2Text,
+                    step3 = "3. Satış yaptıktan sonra 'Satışı Kasaya Ekle' butonuna basıp Midas'ta gerçekleşen gerçek satış fiyatınızı onaylayarak kasanıza kârı aktarın.",
                     targetSymbol = trade.symbol,
-                    recommendedExitPrice = trade.targetExitPrice,
-                    reasoning = "5 dakikalık hedef direnç testi başarıyla tamamlandı. Sıfır zarar prensibi korundu."
+                    recommendedExitPrice = currentPrice.coerceAtLeast(trade.targetExitPrice),
+                    netProfitUsdtExpected = pnlUsdt,
+                    reasoning = if (isPumpingAboveTarget) "Fiyat hedefi aştı. Kârı daha yüksekten almak veya yeni tepe hedefi belirlemek sizin kontrolünüzde." else "5 dakikalık hedef direnç testi başarıyla tamamlandı. Sıfır zarar prensibi korundu."
                 )
             } else {
                 val tech = techMap[trade.symbol]
@@ -275,6 +289,20 @@ object AiAdvisorEngine {
             )
         )
 
+        updatedTrade
+    }
+
+    /**
+     * Updates the target exit price for an open trade.
+     */
+    suspend fun updateTradeTarget(
+        dao: AppDatabaseDao,
+        tradeId: Long,
+        newTargetExitPrice: Double
+    ): AppTradeEntity? = withContext(Dispatchers.IO) {
+        val trade = dao.getTradeById(tradeId) ?: return@withContext null
+        val updatedTrade = trade.copy(targetExitPrice = newTargetExitPrice)
+        dao.updateTrade(updatedTrade)
         updatedTrade
     }
 
