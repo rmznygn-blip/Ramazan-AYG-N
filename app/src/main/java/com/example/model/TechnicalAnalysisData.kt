@@ -26,9 +26,15 @@ data class TechnicalAnalysis5m(
     val bollingerMiddle: Double,
     val candlePattern: String, // e.g. "Boğa Çekiç (Bullish Hammer)", "Destek Sekmesi", "Nötr"
     val volumeRatioToAvg: Double, // e.g. 1.35x
+    val volumeNodePrice: Double = 0.0, // High Volume Node / En çok alım olan kümelenme fiyatı
+    val volumeClusterDescription: String = "", // Hacim kümelenmesi ve emir akışı açıklaması
+    val ambushTimeoutMinutes: Int = 45, // Bekleme süresi (dolmazsa iptal & yeni pusu)
     val confluenceScore: Int, // 0 to 100 institutional quality score
     val isSupportBounceValid: Boolean,
     val isOverboughtRisk: Boolean,
     val recommendation: String, // "MÜKEMMEL DESTEK ALIMI", "BEKLE (DİRENÇ YAKIN)", "NÖTR"
+    val dcaTier1Price: Double = 0.0,
+    val dcaTier2Price: Double = 0.0,
+    val dcaTier3Price: Double = 0.0,
     val lastUpdated: Long = System.currentTimeMillis()
 )

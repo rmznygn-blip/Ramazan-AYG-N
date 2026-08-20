@@ -144,22 +144,22 @@ object AiAdvisorEngine {
         if (bestOpportunity != null && highestScore >= 65) {
             val (asset, tech) = bestOpportunity
             val entryLimit = tech.supportLevel
-            // Net 2.0% profit target + 0.40% total Midas buy/sell commission
-            val targetExit = entryLimit * (1.0 + (2.0 + 0.40) / 100.0)
-            val expectedNetUsdt = (cash * 0.50).coerceAtLeast(minThreshold) * 0.02
+            // Net 2.5% profit target + 0.40% total Midas buy/sell commission
+            val targetExit = entryLimit * (1.0 + (2.5 + 0.40) / 100.0)
+            val expectedNetUsdt = (cash * 0.50).coerceAtLeast(minThreshold) * 0.025
 
             return ActionGuidance(
-                title = "⚡ 5 DAKİKALIK DİP ALIM FIRSATI: ${asset.symbol}/USDT",
-                statusBadge = "GÜÇLÜ SİNYAL (SKOR: %$highestScore)",
+                title = "🎯 TAKTİKSEL PUSU LİMİT ALIŞ: ${asset.symbol}/USDT",
+                statusBadge = "GÜÇLÜ PUSU SİNYALİ (SKOR: %$highestScore)",
                 statusColorHex = 0xFF00FF9D,
-                step1 = "1. Midas Kripto'da ${asset.symbol}/USDT için $${String.format(Locale.US, if (entryLimit < 1.0) "%.4f" else "%.2f", entryLimit)} USDT fiyatından Limit Alış emri girin.",
-                step2 = "2. Alım emriniz gerçekleştiği anda Midas'ta $${String.format(Locale.US, if (targetExit < 1.0) "%.4f" else "%.2f", targetExit)} USDT fiyatından Limit Satış emri oluşturun.",
-                step3 = "3. Satış gerçekleştiğinde net +%2.0 kâr tahsil edilecektir.",
+                step1 = "1. MİDAS'TA GİRİLECEK LİMİT ALIŞ: $${String.format(Locale.US, if (entryLimit < 1.0) "%.4f" else "%.2f", entryLimit)} USDT fiyatından limit alış emri girip pusuya yatın.",
+                step2 = "2. ⏱️ PUSU SÜRESİ (${tech.ambushTimeoutMinutes} DK): ${tech.ambushTimeoutMinutes} dakika beklenir. Fiyat desteğe inmeden tepeye dönerse emir iptal edilir, yeni pusu kurulur.",
+                step3 = "3. 🎯 ÇIKIŞ PLANI: Alım dolduğu anda Midas'ta $${String.format(Locale.US, if (targetExit < 1.0) "%.4f" else "%.2f", targetExit)} USDT limit satış açılır (+%2.5 Net Kâr). Sıfır zarar kuralı aktiftir.",
                 targetSymbol = asset.symbol,
                 recommendedEntryPrice = entryLimit,
                 recommendedExitPrice = targetExit,
                 netProfitUsdtExpected = expectedNetUsdt,
-                reasoning = "RSI ${String.format(Locale.US, "%.1f", tech.rsi14)} aşırı satım bölgesinde ve 5m dip destek seviyesi test ediliyor."
+                reasoning = "${tech.volumeClusterDescription}. RSI (${String.format(Locale.US, "%.1f", tech.rsi14)}) aşırı satım bölgesinde ve EMA21 desteğinde."
             )
         }
 

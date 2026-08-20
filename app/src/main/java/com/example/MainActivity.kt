@@ -209,53 +209,49 @@ fun CryptoAnalystMasterApp() {
                                 Text(
                                     text = if (isInit) "$${String.format(Locale.US, "%.1f", cashVal)}" else "Kasa Gir",
                                     color = if (isInit) EmeraldProfitBright else IceCyanBright,
-                                    fontSize = 11.5.sp,
+                                    fontSize = 11.sp,
                                     fontWeight = FontWeight.ExtraBold,
                                     fontFamily = FontFamily.Monospace
                                 )
-                                Icon(Icons.Default.Edit, contentDescription = null, tint = IceCyanBright, modifier = Modifier.size(11.dp))
+                                Icon(Icons.Default.Edit, contentDescription = null, tint = IceCyanBright, modifier = Modifier.size(10.dp))
                             }
                         }
 
+                        // Interactive Sync / Refresh Badge with Live Clock
                         Surface(
+                            onClick = {
+                                CryptoMarketRepository.refreshManually()
+                                Toast.makeText(context, "🔄 Piyasa ve 5dk mumlar anında güncellendi", Toast.LENGTH_SHORT).show()
+                            },
                             color = ObsidianCard,
                             shape = RoundedCornerShape(8.dp),
-                            border = BorderStroke(1.dp, ObsidianBorder)
+                            border = BorderStroke(1.dp, if (isRefreshing) EmeraldProfit else ObsidianBorder)
                         ) {
                             Row(
-                                modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
+                                modifier = Modifier.padding(horizontal = 7.dp, vertical = 4.dp),
                                 verticalAlignment = Alignment.CenterVertically,
                                 horizontalArrangement = Arrangement.spacedBy(4.dp)
                             ) {
+                                if (isRefreshing) {
+                                    CircularProgressIndicator(
+                                        modifier = Modifier.size(11.dp),
+                                        color = EmeraldProfit,
+                                        strokeWidth = 2.dp
+                                    )
+                                } else {
+                                    Icon(
+                                        imageVector = Icons.Default.Refresh,
+                                        contentDescription = "Yenile",
+                                        tint = EmeraldProfitBright,
+                                        modifier = Modifier.size(12.dp)
+                                    )
+                                }
                                 Text(
                                     text = timeFormatter.format(Date(lastRefreshTime)),
                                     color = IceCyanBright,
                                     fontSize = 11.sp,
                                     fontWeight = FontWeight.Bold,
                                     fontFamily = FontFamily.Monospace
-                                )
-                            }
-                        }
-
-                        IconButton(
-                            onClick = {
-                                CryptoMarketRepository.refreshManually()
-                                Toast.makeText(context, "🔄 Piyasa ve 5dk mumlar yenilendi", Toast.LENGTH_SHORT).show()
-                            },
-                            modifier = Modifier.size(36.dp)
-                        ) {
-                            if (isRefreshing) {
-                                CircularProgressIndicator(
-                                    modifier = Modifier.size(16.dp),
-                                    color = EmeraldProfit,
-                                    strokeWidth = 2.dp
-                                )
-                            } else {
-                                Icon(
-                                    imageVector = Icons.Default.Refresh,
-                                    contentDescription = "Yenile",
-                                    tint = IceCyanBright,
-                                    modifier = Modifier.size(20.dp)
                                 )
                             }
                         }
@@ -363,6 +359,12 @@ fun CryptoAnalystMasterApp() {
                     oracleMap = binanceOracleMap,
                     techMap = technicalAnalysisMap,
                     coinMemories = coinMemories,
+                    lastRefreshTime = lastRefreshTime,
+                    isRefreshing = isRefreshing,
+                    onManualRefresh = {
+                        CryptoMarketRepository.refreshManually()
+                        Toast.makeText(context, "🔄 Veriler ve 5dk mumlar güncellendi", Toast.LENGTH_SHORT).show()
+                    },
                     onOpenBudgetProposal = { asset ->
                         showBudgetDialogForAsset = asset
                     },
@@ -1578,6 +1580,9 @@ fun LiveAssistantScreen(
     oracleMap: Map<String, BinanceOracleData>,
     techMap: Map<String, TechnicalAnalysis5m>,
     coinMemories: List<CoinMemoryEntity>,
+    lastRefreshTime: Long = System.currentTimeMillis(),
+    isRefreshing: Boolean = false,
+    onManualRefresh: () -> Unit = {},
     onOpenBudgetProposal: (CryptoAsset) -> Unit,
     onOpenAddExistingDialog: () -> Unit,
     onRequestConfirmSale: (trade: AppTradeEntity, currentPrice: Double) -> Unit,
@@ -1598,6 +1603,66 @@ fun LiveAssistantScreen(
         contentPadding = PaddingValues(vertical = 12.dp),
         verticalArrangement = Arrangement.spacedBy(12.dp)
     ) {
+        // LIVE DATA & 5-MINUTE SNIPER SYNC STATUS BAR
+        item {
+            Surface(
+                modifier = Modifier.fillMaxWidth(),
+                color = ObsidianCard,
+                shape = RoundedCornerShape(12.dp),
+                border = BorderStroke(1.dp, if (isRefreshing) EmeraldProfit else ObsidianBorder)
+            ) {
+                Row(
+                    modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        Box(
+                            modifier = Modifier
+                                .size(8.dp)
+                                .clip(CircleShape)
+                                .background(if (isRefreshing) EmeraldProfitBright else EmeraldProfit)
+                        )
+                        Column {
+                            Text(
+                                text = "CANLI BİNANCE & MİDAS VERİSİ",
+                                color = TextPrimary,
+                                fontSize = 11.sp,
+                                fontWeight = FontWeight.ExtraBold,
+                                fontFamily = FontFamily.Monospace
+                            )
+                            Text(
+                                text = "Son Güncelleme: ${SimpleDateFormat("HH:mm:ss", Locale.getDefault()).format(Date(lastRefreshTime))}",
+                                color = TextSecondary,
+                                fontSize = 10.sp,
+                                fontFamily = FontFamily.Monospace
+                            )
+                        }
+                    }
+
+                    Surface(
+                        onClick = onManualRefresh,
+                        color = if (isRefreshing) EmeraldContainer else ObsidianCardElevated,
+                        shape = RoundedCornerShape(8.dp),
+                        border = BorderStroke(1.dp, EmeraldProfit.copy(alpha = 0.6f))
+                    ) {
+                        Row(
+                            modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(5.dp)
+                        ) {
+                            if (isRefreshing) {
+                                CircularProgressIndicator(modifier = Modifier.size(11.dp), color = EmeraldProfit, strokeWidth = 2.dp)
+                                Text("Yenileniyor...", color = EmeraldProfitBright, fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                            } else {
+                                Icon(Icons.Default.Refresh, contentDescription = null, tint = EmeraldProfitBright, modifier = Modifier.size(13.dp))
+                                Text("Şimdi Yenile", color = EmeraldProfitBright, fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                            }
+                        }
+                    }
+                }
+            }
+        }
         // 1. TOP AI HERO "ŞİMDİ NE YAPMALIYIM?" LUXURY BANNER
         item {
             Surface(
@@ -2003,7 +2068,7 @@ fun LiveAssistantScreen(
 
             // Limit order calculations
             val entryLimitPrice = if (tech != null && tech.supportLevel > 0) tech.supportLevel else currentPrice * 0.985
-            val targetNetPercent = 2.0
+            val targetNetPercent = 2.5
             val targetExitPrice = entryLimitPrice * (1.0 + (targetNetPercent + 0.40) / 100.0)
             val rsiValue = tech?.rsi14 ?: 50.0
             val spread = oracle?.leadLagSpreadPercent ?: 0.0
@@ -2091,7 +2156,7 @@ fun LiveAssistantScreen(
                             border = BorderStroke(1.dp, EmeraldProfit.copy(alpha = 0.5f))
                         ) {
                             Column(modifier = Modifier.padding(10.dp), verticalArrangement = Arrangement.spacedBy(2.dp)) {
-                                Text("🟢 GİRİŞ (LİMİT AL)", color = EmeraldProfitBright, fontSize = 9.5.sp, fontWeight = FontWeight.Bold, fontFamily = FontFamily.Monospace)
+                                Text("🎯 PUSU LİMİT AL", color = EmeraldProfitBright, fontSize = 9.5.sp, fontWeight = FontWeight.Bold, fontFamily = FontFamily.Monospace)
                                 Text(
                                     text = "$${String.format(Locale.US, if (entryLimitPrice < 1.0) "%.4f" else "%.2f", entryLimitPrice)}",
                                     color = TextPrimary,
@@ -2100,7 +2165,7 @@ fun LiveAssistantScreen(
                                     fontFamily = FontFamily.Monospace
                                 )
                                 Text(
-                                    text = if (distanceToEntryPct <= 0.3) "⚡ Alım Eşiğinde!" else "%${String.format(Locale.US, "%.2f", distanceToEntryPct)} yukarıda",
+                                    text = if (distanceToEntryPct <= 0.3) "⚡ Pusu Eşiğinde!" else "%${String.format(Locale.US, "%.2f", distanceToEntryPct)} yukarıda",
                                     color = if (distanceToEntryPct <= 0.3) EmeraldProfitBright else TextSecondary,
                                     fontSize = 9.5.sp
                                 )
@@ -2115,7 +2180,7 @@ fun LiveAssistantScreen(
                             border = BorderStroke(1.dp, CoralRed.copy(alpha = 0.5f))
                         ) {
                             Column(modifier = Modifier.padding(10.dp), verticalArrangement = Arrangement.spacedBy(2.dp)) {
-                                Text("🔴 ÇIKIŞ (KÂR AL)", color = CoralRedBright, fontSize = 9.5.sp, fontWeight = FontWeight.Bold, fontFamily = FontFamily.Monospace)
+                                Text("🔴 HEDEF LİMİT SAT", color = CoralRedBright, fontSize = 9.5.sp, fontWeight = FontWeight.Bold, fontFamily = FontFamily.Monospace)
                                 Text(
                                     text = "$${String.format(Locale.US, if (targetExitPrice < 1.0) "%.4f" else "%.2f", targetExitPrice)}",
                                     color = TextPrimary,
@@ -2133,40 +2198,68 @@ fun LiveAssistantScreen(
                         }
                     }
 
-                    // EXPLICIT LIMIT ORDERS INSTRUCTION BOX
+                    // TACTICAL AMBUSH & VOLUME CLUSTER BOX
                     Surface(
                         modifier = Modifier.fillMaxWidth(),
                         color = ObsidianBg,
                         shape = RoundedCornerShape(10.dp),
                         border = BorderStroke(0.8.dp, ObsidianBorder)
                     ) {
-                        Column(modifier = Modifier.padding(10.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                            Text("📢 MİDAS'TA GİRİLECEK EMİRLER:", color = IceCyanBright, fontSize = 10.sp, fontWeight = FontWeight.ExtraBold, fontFamily = FontFamily.Monospace)
-                            Row(
-                                modifier = Modifier.fillMaxWidth(),
-                                horizontalArrangement = Arrangement.SpaceBetween
-                            ) {
-                                Text("1. Limit Alış Emri:", color = EmeraldProfitBright, fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                        Column(modifier = Modifier.padding(10.dp), verticalArrangement = Arrangement.spacedBy(5.dp)) {
+                            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(5.dp)) {
+                                Icon(Icons.Default.GpsFixed, contentDescription = null, tint = IceCyanBright, modifier = Modifier.size(13.dp))
+                                Text("🎯 TAKTİKSEL PUSU VE HACİM ANALİZİ:", color = IceCyanBright, fontSize = 10.sp, fontWeight = FontWeight.ExtraBold, fontFamily = FontFamily.Monospace)
+                            }
+
+                            if (tech != null && tech.volumeClusterDescription.isNotBlank()) {
                                 Text(
-                                    text = "$${String.format(Locale.US, if (entryLimitPrice < 1.0) "%.4f" else "%.2f", entryLimitPrice)} USDT",
-                                    color = TextPrimary,
-                                    fontSize = 11.5.sp,
-                                    fontWeight = FontWeight.ExtraBold,
-                                    fontFamily = FontFamily.Monospace
+                                    text = "📊 ${tech.volumeClusterDescription}",
+                                    color = TextPrimary.copy(alpha = 0.9f),
+                                    fontSize = 10.5.sp,
+                                    lineHeight = 14.sp
                                 )
                             }
-                            Row(
-                                modifier = Modifier.fillMaxWidth(),
-                                horizontalArrangement = Arrangement.SpaceBetween
+
+                            // Ambush Timeout & Re-eval rule
+                            Surface(
+                                color = ObsidianCardElevated,
+                                shape = RoundedCornerShape(6.dp),
+                                modifier = Modifier.fillMaxWidth()
                             ) {
-                                Text("2. Limit Satış Emri:", color = CoralRedBright, fontSize = 11.sp, fontWeight = FontWeight.Bold)
-                                Text(
-                                    text = "$${String.format(Locale.US, if (targetExitPrice < 1.0) "%.4f" else "%.2f", targetExitPrice)} USDT (+%${String.format(Locale.US, "%.1f", targetNetPercent)} Net)",
-                                    color = EmeraldProfitBright,
-                                    fontSize = 11.5.sp,
-                                    fontWeight = FontWeight.ExtraBold,
-                                    fontFamily = FontFamily.Monospace
-                                )
+                                Row(
+                                    modifier = Modifier.padding(horizontal = 8.dp, vertical = 5.dp),
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.spacedBy(6.dp)
+                                ) {
+                                    Icon(Icons.Default.Timer, contentDescription = null, tint = GoldWarm, modifier = Modifier.size(13.dp))
+                                    Text(
+                                        text = "⏱️ Pusu Süresi: ${tech?.ambushTimeoutMinutes ?: 45} Dk (Fiyat desteğe inmeden tepeye kaçarsa emri iptal edin & yeni pusuya yatın)",
+                                        color = GoldWarm,
+                                        fontSize = 10.sp,
+                                        fontWeight = FontWeight.Bold
+                                    )
+                                }
+                            }
+
+                            // 3-Tier DCA Breakdown Plan
+                            val tier1P = entryLimitPrice
+                            val tier2P = tech?.dcaTier2Price ?: (entryLimitPrice * 0.975)
+                            val tier3P = tech?.dcaTier3Price ?: (entryLimitPrice * 0.950)
+
+                            Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                                Text("🛡️ 3 Kademeli Savunma Planı (Sıfır Zarar):", color = TextSecondary, fontSize = 9.5.sp, fontWeight = FontWeight.Bold)
+                                Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                                    Text("1. Kademe (%30 Bütçe):", color = TextTertiary, fontSize = 9.5.sp)
+                                    Text("$${String.format(Locale.US, if (tier1P < 1.0) "%.4f" else "%.2f", tier1P)} USDT", color = EmeraldProfitBright, fontSize = 10.sp, fontFamily = FontFamily.Monospace, fontWeight = FontWeight.Bold)
+                                }
+                                Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                                    Text("2. Kademe Dip (%35 Bütçe):", color = TextTertiary, fontSize = 9.5.sp)
+                                    Text("$${String.format(Locale.US, if (tier2P < 1.0) "%.4f" else "%.2f", tier2P)} USDT", color = IceCyanBright, fontSize = 10.sp, fontFamily = FontFamily.Monospace, fontWeight = FontWeight.Bold)
+                                }
+                                Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                                    Text("3. Kademe Savunma (%35 Bütçe):", color = TextTertiary, fontSize = 9.5.sp)
+                                    Text("$${String.format(Locale.US, if (tier3P < 1.0) "%.4f" else "%.2f", tier3P)} USDT", color = GoldWarm, fontSize = 10.sp, fontFamily = FontFamily.Monospace, fontWeight = FontWeight.Bold)
+                                }
                             }
                         }
                     }
@@ -2184,7 +2277,7 @@ fun LiveAssistantScreen(
                     ) {
                         Icon(imageVector = Icons.Default.Shield, contentDescription = null, modifier = Modifier.size(16.dp))
                         Spacer(modifier = Modifier.width(6.dp))
-                        Text("💼 Bu Pozisyona Kasa Bütçesi Ayır & Başlat", fontSize = 11.5.sp, fontWeight = FontWeight.ExtraBold)
+                        Text("🎯 Midas'ta Pusu Limit Emri Aç & Bütçe Ayır", fontSize = 11.5.sp, fontWeight = FontWeight.ExtraBold)
                     }
                 }
             }

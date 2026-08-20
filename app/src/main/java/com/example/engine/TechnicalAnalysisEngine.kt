@@ -2,6 +2,7 @@ package com.example.engine
 
 import com.example.model.CandleStick
 import com.example.model.TechnicalAnalysis5m
+import java.util.Locale
 import kotlin.math.max
 import kotlin.math.min
 import kotlin.math.pow
@@ -79,10 +80,25 @@ object TechnicalAnalysisEngine {
         // 4. RSI (14 periods on 5m)
         val rsi14 = calculateRSI(closes, 14)
 
-        // 5. Volume Spike Detection
+        // 5. Volume Spike & Volume Profile Node (Point of Control)
         val volumes = candles.map { it.volume }
         val avgVolume = volumes.takeLast(15).average().coerceAtLeast(1.0)
         val volumeRatio = latestCandle.volume / avgVolume
+
+        // Find the candle with highest volume in the last 20 candles (Institutional Accumulation Node)
+        val recentCandles = candles.takeLast(min(20, candles.size))
+        val highestVolumeCandle = recentCandles.maxByOrNull { it.volume } ?: latestCandle
+        val volumeNodePrice = (highestVolumeCandle.open + highestVolumeCandle.close + highestVolumeCandle.low + highestVolumeCandle.high) / 4.0
+        val volNodeRatio = if (avgVolume > 0) (highestVolumeCandle.volume / avgVolume) * 100.0 else 100.0
+        val volumeClusterDescription = "Son saatlerde en yoğun alım kümelenmesi $${String.format(Locale.US, if (volumeNodePrice < 1.0) "%.4f" else "%.2f", volumeNodePrice)} seviyesinde gerçekleşti (Hacim: %${String.format(Locale.US, "%.0f", volNodeRatio)})"
+
+        // 3-Tier DCA Zones:
+        // Tier 1: Dynamic support / volume node
+        // Tier 2: 2.5% below Tier 1
+        // Tier 3: 5.0% below Tier 1 (Final institutional defense)
+        val dcaTier1Price = dynamicSupport
+        val dcaTier2Price = dynamicSupport * 0.975
+        val dcaTier3Price = dynamicSupport * 0.950
 
         // 6. Candlestick Pattern Recognition on 5m
         val bodySize = Math.abs(latestCandle.close - latestCandle.open)
@@ -168,10 +184,16 @@ object TechnicalAnalysisEngine {
             bollingerMiddle = bbMiddle,
             candlePattern = candlePattern,
             volumeRatioToAvg = volumeRatio,
+            volumeNodePrice = volumeNodePrice,
+            volumeClusterDescription = volumeClusterDescription,
+            ambushTimeoutMinutes = 45,
             confluenceScore = finalScore,
             isSupportBounceValid = isSupportBounceValid,
             isOverboughtRisk = isOverboughtRisk,
-            recommendation = recommendation
+            recommendation = recommendation,
+            dcaTier1Price = dcaTier1Price,
+            dcaTier2Price = dcaTier2Price,
+            dcaTier3Price = dcaTier3Price
         )
     }
 
