@@ -232,7 +232,10 @@ object AiAdvisorEngine {
 
         if (bestOpportunity != null && highestScore >= 60) {
             val (asset, tech) = bestOpportunity
-            val entryLimit = tech.dcaTier1Price.takeIf { it > 0 } ?: tech.supportLevel
+            val currentPrice = if (asset.rawPrice > 0) asset.rawPrice else tech.currentPrice
+            val strategyAnalysis = evaluateSmartEntryStrategies(asset, tech, currentPrice)
+            val recommendedPlan = strategyAnalysis.options.firstOrNull { it.isRecommended } ?: strategyAnalysis.options[0]
+            val entryLimit = recommendedPlan.price
             // Net 2.0% profit target + 0.40% total Midas buy/sell commission
             val targetExit = entryLimit * (1.0 + (2.0 + 0.40) / 100.0)
             val tier1InvestBudget = (cash * (1.0 / 7.0)).coerceIn(15.0, (cash * 0.35).coerceAtLeast(15.0))
@@ -242,17 +245,17 @@ object AiAdvisorEngine {
             val zScoreText = String.format(Locale.US, "%.2f", tech.zScore)
 
             return ActionGuidance(
-                title = "🎯 1:2:4 KANTİTATİF PUSU GİRİŞİ: ${asset.symbol}/USDT",
+                title = "🎯 AI ÖNERİSİ (${recommendedPlan.title}): ${asset.symbol}/USDT",
                 statusBadge = "GÜÇLÜ PUSU SİNYALİ (SKOR: %$highestScore)",
                 statusColorHex = 0xFF00FF9D,
-                step1 = "1. MİDAS 1. KADEME LİMİT ALIŞ: $${String.format(Locale.US, if (entryLimit < 1.0) "%.4f" else "%.2f", entryLimit)} USDT fiyatından ~$${String.format(Locale.US, "%.0f", tier1InvestBudget)} limit alış girin.",
-                step2 = "2. 🛡️ ATR DİP KORUMASI: Fiyat sarkarsa 2. Kademe ($${String.format(Locale.US, "%.2f", tech.dcaTier2Price)}) ve 3. Kademe ($${String.format(Locale.US, "%.2f", tech.dcaTier3Price)}) hazır bekler.",
+                step1 = "1. MİDAS 1. KADEME (${recommendedPlan.title}): $${String.format(Locale.US, if (entryLimit < 1.0) "%.4f" else "%.2f", entryLimit)} USDT fiyatından ~$${String.format(Locale.US, "%.0f", tier1InvestBudget)} limit alış girin (${recommendedPlan.fillSpeedText}).",
+                step2 = "2. 🛡️ 3 KADEMELİ SAVUNMA: Fiyat sarkarsa 2. Kademe ($${String.format(Locale.US, if (tech.dcaTier2Price < 1.0) "%.4f" else "%.2f", tech.dcaTier2Price)}) ve 3. Kademe ($${String.format(Locale.US, if (tech.dcaTier3Price < 1.0) "%.4f" else "%.2f", tech.dcaTier3Price)}) hazır bekler.",
                 step3 = "3. 🎯 KÂR ÇIKIŞI (+%2.0 NET): Alım dolduğu anda Midas'ta $${String.format(Locale.US, if (targetExit < 1.0) "%.4f" else "%.2f", targetExit)} USDT limit satış açılır.",
                 targetSymbol = asset.symbol,
                 recommendedEntryPrice = entryLimit,
                 recommendedExitPrice = targetExit,
                 netProfitUsdtExpected = expectedNetUsdt,
-                reasoning = "Binance Tahtası: %$orderBookRatio Alıcı Duvarı | Z-Score: ${zScoreText}σ | ATR: ${String.format(Locale.US, "%.2f", tech.atr14)} | RSI: ${String.format(Locale.US, "%.1f", tech.rsi14)}"
+                reasoning = "Yapay Zekâ Analizi: ${strategyAnalysis.aiRecommendationReason} | Tahta: %$orderBookRatio Alıcı | Z-Score: ${zScoreText}σ | ATR: ${String.format(Locale.US, "%.2f", tech.atr14)}"
             )
         }
 
@@ -696,7 +699,130 @@ object AiAdvisorEngine {
             tiers = listOf(t1, t2, t3)
         )
     }
+
+    /**
+     * Calculates the 3 Dynamic Entry Modes (Fast Trend, Balanced Support, Deep Dip)
+     * and utilizes AI quant rules to designate the optimal recommendation with clear reasoning.
+     */
+    fun evaluateSmartEntryStrategies(
+        asset: CryptoAsset,
+        tech: TechnicalAnalysis5m?,
+        currentPrice: Double
+    ): CoinEntryStrategyAnalysis {
+        val safeCurrent = if (asset.rawPrice > 0) asset.rawPrice else if (currentPrice > 0) currentPrice else (tech?.currentPrice ?: 100.0)
+
+        // 1. FAST_TREND: Pullback to EMA9 or 0.35% - 0.50% below current price
+        val ema9 = tech?.ema9 ?: (safeCurrent * 0.996)
+        val fastPrice = if (ema9 > 0 && ema9 in (safeCurrent * 0.990)..(safeCurrent * 0.998)) {
+            ema9
+        } else {
+            safeCurrent * 0.9960 // -0.40%
+        }
+
+        // 2. BALANCED_SUPPORT: Pullback to Bollinger Middle / EMA21 or 0.8% - 1.2% below
+        val ema21 = tech?.ema21 ?: (safeCurrent * 0.990)
+        val bbMid = tech?.bollingerMiddle ?: (safeCurrent * 0.990)
+        val balancedPrice = if (bbMid > 0 && bbMid in (safeCurrent * 0.982)..(safeCurrent * 0.994)) {
+            bbMid
+        } else if (ema21 > 0 && ema21 in (safeCurrent * 0.982)..(safeCurrent * 0.994)) {
+            ema21
+        } else {
+            safeCurrent * 0.9900 // -1.0%
+        }
+
+        // 3. DEEP_DIP: Full dynamic support / Bollinger Lower / 1.8% - 2.5% below
+        val dynamicSupport = tech?.supportLevel ?: (safeCurrent * 0.982)
+        val deepPrice = if (dynamicSupport > 0 && dynamicSupport in (safeCurrent * 0.960)..(safeCurrent * 0.988)) {
+            dynamicSupport
+        } else {
+            safeCurrent * 0.9820 // -1.8%
+        }
+
+        // AI Recommendation Logic based on Trend, Momentum & RSI:
+        // If market has strong upward momentum (RSI > 50, price > ema21), deep dips won't trigger -> FAST_TREND is recommended!
+        val rsi = tech?.rsi14 ?: 50.0
+        val isBullishTrend = (rsi >= 50.0 && safeCurrent >= (tech?.ema21 ?: 0.0)) || (tech?.confluenceScore ?: 50) >= 65
+        val isOversoldOrDip = rsi <= 38.0 || (tech?.isZScoreDip == true) || ((tech?.distanceToSupportPercent ?: 2.0) <= 0.60)
+
+        val recommendedType = when {
+            isOversoldOrDip -> SmartEntryType.DEEP_DIP
+            isBullishTrend -> SmartEntryType.FAST_TREND
+            else -> SmartEntryType.BALANCED_SUPPORT
+        }
+
+        val aiReason = when (recommendedType) {
+            SmartEntryType.FAST_TREND -> "Yükseliş trendi aktif (RSI: ${String.format(Locale.US, "%.0f", rsi)}). Fiyat derin desteğe inmeden mikro çekilmede yakalamak için Hızlı Giriş önerilir. Düşüşe karşı 2. ve 3. kademeler hazırdır."
+            SmartEntryType.DEEP_DIP -> "Fiyat zaten aşırı satım/dip bölgesinde (RSI: ${String.format(Locale.US, "%.0f", rsi)}). Maksimum kâr potansiyeli için ana tabandan Dip Avcısı önerilir."
+            SmartEntryType.BALANCED_SUPPORT -> "Piyasa dengeli konsolidasyonda. 30-45 dk içinde dolma ihtimali en dengeli olan Mikro Destek seviyesi önerilir."
+        }
+
+        val fastDrop = ((safeCurrent - fastPrice) / safeCurrent) * 100.0
+        val balancedDrop = ((safeCurrent - balancedPrice) / safeCurrent) * 100.0
+        val deepDrop = ((safeCurrent - deepPrice) / safeCurrent) * 100.0
+
+        val options = listOf(
+            SmartEntryPlan(
+                type = SmartEntryType.FAST_TREND,
+                title = "⚡ Hızlı Giriş",
+                subtitle = "Trend / EMA9",
+                price = fastPrice,
+                dropPercent = fastDrop.coerceAtLeast(0.1),
+                isRecommended = recommendedType == SmartEntryType.FAST_TREND,
+                reasoning = "Trendi kaçırmamak için anlık fiyata yakın giriş (%80+ dolma ihtimali)",
+                fillSpeedText = "~10-20 Dk Dolum"
+            ),
+            SmartEntryPlan(
+                type = SmartEntryType.BALANCED_SUPPORT,
+                title = "⚖️ Dengeli Destek",
+                subtitle = "Mikro Destek",
+                price = balancedPrice,
+                dropPercent = balancedDrop.coerceAtLeast(0.4),
+                isRecommended = recommendedType == SmartEntryType.BALANCED_SUPPORT,
+                reasoning = "Orta seviye geri çekilme testi (%55 dolma ihtimali)",
+                fillSpeedText = "~30-45 Dk Dolum"
+            ),
+            SmartEntryPlan(
+                type = SmartEntryType.DEEP_DIP,
+                title = "🛡️ Dip Avcısı",
+                subtitle = "Ana Taban / BB Alt",
+                price = deepPrice,
+                dropPercent = deepDrop.coerceAtLeast(1.0),
+                isRecommended = recommendedType == SmartEntryType.DEEP_DIP,
+                reasoning = "Sert sarkma veya panik satışında en dipten alma (%25 dolma ihtimali)",
+                fillSpeedText = "~45-90 Dk / Sarkma"
+            )
+        )
+
+        return CoinEntryStrategyAnalysis(
+            recommendedType = recommendedType,
+            aiRecommendationReason = aiReason,
+            options = options
+        )
+    }
 }
+
+enum class SmartEntryType {
+    FAST_TREND,
+    BALANCED_SUPPORT,
+    DEEP_DIP
+}
+
+data class SmartEntryPlan(
+    val type: SmartEntryType,
+    val title: String,
+    val subtitle: String,
+    val price: Double,
+    val dropPercent: Double,
+    val isRecommended: Boolean,
+    val reasoning: String,
+    val fillSpeedText: String
+)
+
+data class CoinEntryStrategyAnalysis(
+    val recommendedType: SmartEntryType,
+    val aiRecommendationReason: String,
+    val options: List<SmartEntryPlan>
+)
 
 data class DcaPlanTier(
     val tierNumber: Int,

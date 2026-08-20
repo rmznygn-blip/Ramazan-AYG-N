@@ -515,14 +515,18 @@ fun CryptoAnalystMasterApp() {
                 val tech = technicalAnalysisMap[asset.symbol]
                 val oracle = binanceOracleMap[asset.symbol]
                 val currentPrice = if (asset.rawPrice > 0) asset.rawPrice else (oracle?.binanceGlobalPrice ?: 0.0)
-                val defaultSupportPrice = if (tech != null && tech.supportLevel > 0) tech.supportLevel else currentPrice * 0.985
                 val availableCash = capitalProfile?.availableCashUsdt ?: 100.0
 
-                var entryPriceInput by remember(asset) {
-                    mutableStateOf(String.format(Locale.US, if (defaultSupportPrice < 1.0) "%.4f" else "%.2f", defaultSupportPrice))
+                val strategyAnalysis = remember(asset, tech, currentPrice) {
+                    AiAdvisorEngine.evaluateSmartEntryStrategies(asset, tech, currentPrice)
                 }
-                val parsedCustomEntry = parseFlexibleDouble(entryPriceInput) ?: defaultSupportPrice
-                val entryPrice = if (parsedCustomEntry > 0) parsedCustomEntry else defaultSupportPrice
+                val recommendedPlan = strategyAnalysis.options.firstOrNull { it.isRecommended } ?: strategyAnalysis.options[0]
+
+                var entryPriceInput by remember(asset) {
+                    mutableStateOf(String.format(Locale.US, if (recommendedPlan.price < 1.0) "%.4f" else "%.2f", recommendedPlan.price))
+                }
+                val parsedCustomEntry = parseFlexibleDouble(entryPriceInput) ?: recommendedPlan.price
+                val entryPrice = if (parsedCustomEntry > 0) parsedCustomEntry else recommendedPlan.price
 
                 // Recommend 60% of cash as total allocated pool, max $60, min $30
                 val totalAllocatedPool = (availableCash * 0.60).coerceIn(30.0, 60.0).coerceAtMost(availableCash)
@@ -553,55 +557,131 @@ fun CryptoAnalystMasterApp() {
                     },
                     text = {
                         Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                            // 3 Dynamic Strategy Selection Cards
                             Text(
-                                text = "Midas limit alış fiyatınızı belirleyin veya Midas yuvarlamasına göre düzeltin:",
+                                text = "🎯 Giriş Stratejisi Seçin (Yapay Zekâ Yönlendirmeli):",
                                 color = TextSecondary,
-                                fontSize = 11.5.sp
+                                fontSize = 11.sp,
+                                fontWeight = FontWeight.Bold
                             )
 
-                            // Editable Entry Price Input
-                            OutlinedTextField(
-                                value = entryPriceInput,
-                                onValueChange = { entryPriceInput = it },
-                                label = { Text("Pusu Limit Alış Fiyatı (USDT)", fontSize = 11.sp) },
-                                modifier = Modifier.fillMaxWidth(),
-                                singleLine = true,
-                                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
-                                colors = OutlinedTextFieldDefaults.colors(
-                                    focusedBorderColor = EmeraldProfitBright,
-                                    unfocusedBorderColor = ObsidianBorder,
-                                    focusedTextColor = Color.White,
-                                    unfocusedTextColor = Color.White
-                                )
-                            )
-
-                            // Quick Price Rounding / Preset Chips
                             Row(
                                 modifier = Modifier.fillMaxWidth(),
-                                horizontalArrangement = Arrangement.spacedBy(6.dp)
+                                horizontalArrangement = Arrangement.spacedBy(5.dp)
                             ) {
-                                // 1. AI Support / Dip Chip
-                                Surface(
-                                    modifier = Modifier
-                                        .weight(1f)
-                                        .clickable {
-                                            entryPriceInput = String.format(Locale.US, if (defaultSupportPrice < 1.0) "%.4f" else "%.2f", defaultSupportPrice)
-                                        },
-                                    color = ObsidianBg,
-                                    shape = RoundedCornerShape(6.dp),
-                                    border = BorderStroke(0.8.dp, IceCyan.copy(alpha = 0.5f))
+                                strategyAnalysis.options.forEach { opt ->
+                                    val isSelected = Math.abs(entryPrice - opt.price) / opt.price < 0.003
+                                    Surface(
+                                        modifier = Modifier
+                                            .weight(1f)
+                                            .clickable {
+                                                entryPriceInput = String.format(Locale.US, if (opt.price < 1.0) "%.4f" else "%.2f", opt.price)
+                                            },
+                                        color = if (isSelected) {
+                                            if (opt.isRecommended) EmeraldContainer.copy(alpha = 0.85f) else ObsidianCardElevated
+                                        } else ObsidianBg,
+                                        shape = RoundedCornerShape(8.dp),
+                                        border = BorderStroke(
+                                            width = if (isSelected || opt.isRecommended) 1.2.dp else 0.6.dp,
+                                            color = if (isSelected) EmeraldProfitBright else if (opt.isRecommended) GoldWarm else ObsidianBorder
+                                        )
+                                    ) {
+                                        Column(
+                                            modifier = Modifier.padding(horizontal = 4.dp, vertical = 6.dp),
+                                            horizontalAlignment = Alignment.CenterHorizontally,
+                                            verticalArrangement = Arrangement.spacedBy(2.dp)
+                                        ) {
+                                            if (opt.isRecommended) {
+                                                Surface(
+                                                    color = GoldWarm,
+                                                    shape = RoundedCornerShape(3.dp)
+                                                ) {
+                                                    Text(
+                                                        text = "⭐ AI ÖNERİSİ",
+                                                        color = Color.Black,
+                                                        fontSize = 7.5.sp,
+                                                        fontWeight = FontWeight.ExtraBold,
+                                                        modifier = Modifier.padding(horizontal = 3.dp, vertical = 1.dp)
+                                                    )
+                                                }
+                                            } else {
+                                                Text(
+                                                    text = opt.title.take(8),
+                                                    color = TextTertiary,
+                                                    fontSize = 8.sp,
+                                                    fontWeight = FontWeight.Bold
+                                                )
+                                            }
+
+                                            Text(
+                                                text = "$${String.format(Locale.US, if (opt.price < 1.0) "%.4f" else "%.2f", opt.price)}",
+                                                color = if (isSelected) Color.White else TextPrimary,
+                                                fontSize = 11.sp,
+                                                fontWeight = FontWeight.ExtraBold,
+                                                fontFamily = FontFamily.Monospace
+                                            )
+
+                                            Text(
+                                                text = "-%${String.format(Locale.US, "%.1f", opt.dropPercent)}",
+                                                color = if (opt.isRecommended) EmeraldProfitBright else IceCyanBright,
+                                                fontSize = 9.sp,
+                                                fontWeight = FontWeight.Bold
+                                            )
+
+                                            Text(
+                                                text = opt.fillSpeedText,
+                                                color = TextSecondary,
+                                                fontSize = 7.5.sp,
+                                                maxLines = 1
+                                            )
+                                        }
+                                    }
+                                }
+                            }
+
+                            // AI Strategy Explanation Callout
+                            Surface(
+                                color = ObsidianBg,
+                                shape = RoundedCornerShape(8.dp),
+                                border = BorderStroke(0.6.dp, GoldWarm.copy(alpha = 0.5f)),
+                                modifier = Modifier.fillMaxWidth()
+                            ) {
+                                Row(
+                                    modifier = Modifier.padding(8.dp),
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.spacedBy(6.dp)
                                 ) {
+                                    Text("🤖", fontSize = 14.sp)
                                     Text(
-                                        text = "🤖 Dip Destek\n$${String.format(Locale.US, if (defaultSupportPrice < 1.0) "%.4f" else "%.2f", defaultSupportPrice)}",
-                                        color = IceCyanBright,
-                                        fontSize = 9.5.sp,
-                                        lineHeight = 12.sp,
-                                        textAlign = TextAlign.Center,
-                                        modifier = Modifier.padding(horizontal = 4.dp, vertical = 4.dp)
+                                        text = strategyAnalysis.aiRecommendationReason,
+                                        color = TextPrimary.copy(alpha = 0.95f),
+                                        fontSize = 10.sp,
+                                        lineHeight = 13.5.sp
                                     )
                                 }
+                            }
 
-                                // 2. Clean Integer / Round Chip
+                            // Editable Entry Price Input + Quick Rounding Chips
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.spacedBy(6.dp),
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                OutlinedTextField(
+                                    value = entryPriceInput,
+                                    onValueChange = { entryPriceInput = it },
+                                    label = { Text("Seçilen / Özel Limit Alış", fontSize = 10.sp) },
+                                    modifier = Modifier.weight(1.3f),
+                                    singleLine = true,
+                                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                                    colors = OutlinedTextFieldDefaults.colors(
+                                        focusedBorderColor = EmeraldProfitBright,
+                                        unfocusedBorderColor = ObsidianBorder,
+                                        focusedTextColor = Color.White,
+                                        unfocusedTextColor = Color.White
+                                    )
+                                )
+
                                 val roundedPrice = if (entryPrice >= 100.0) {
                                     Math.round(entryPrice).toDouble()
                                 } else if (entryPrice >= 1.0) {
@@ -609,45 +689,21 @@ fun CryptoAnalystMasterApp() {
                                 } else {
                                     Math.round(entryPrice * 1000.0) / 1000.0
                                 }
+
                                 Surface(
                                     modifier = Modifier
-                                        .weight(1f)
+                                        .weight(0.7f)
                                         .clickable {
                                             entryPriceInput = String.format(Locale.US, if (roundedPrice < 1.0) "%.4f" else if (entryPrice >= 100.0) "%.0f" else "%.2f", roundedPrice)
                                         },
                                     color = ObsidianBg,
-                                    shape = RoundedCornerShape(6.dp),
-                                    border = BorderStroke(0.8.dp, GoldWarm.copy(alpha = 0.5f))
+                                    shape = RoundedCornerShape(8.dp),
+                                    border = BorderStroke(0.8.dp, GoldWarm.copy(alpha = 0.6f))
                                 ) {
-                                    Text(
-                                        text = "🎯 Düz Yuvarla\n$${String.format(Locale.US, if (roundedPrice < 1.0) "%.4f" else if (entryPrice >= 100.0) "%.0f" else "%.2f", roundedPrice)}",
-                                        color = GoldWarm,
-                                        fontSize = 9.5.sp,
-                                        lineHeight = 12.sp,
-                                        textAlign = TextAlign.Center,
-                                        modifier = Modifier.padding(horizontal = 4.dp, vertical = 4.dp)
-                                    )
-                                }
-
-                                // 3. Current Market Price Chip
-                                Surface(
-                                    modifier = Modifier
-                                        .weight(1f)
-                                        .clickable {
-                                            entryPriceInput = String.format(Locale.US, if (currentPrice < 1.0) "%.4f" else "%.2f", currentPrice)
-                                        },
-                                    color = ObsidianBg,
-                                    shape = RoundedCornerShape(6.dp),
-                                    border = BorderStroke(0.8.dp, ObsidianBorder)
-                                ) {
-                                    Text(
-                                        text = "⚡ Anlık Piyasa\n$${String.format(Locale.US, if (currentPrice < 1.0) "%.4f" else "%.2f", currentPrice)}",
-                                        color = TextSecondary,
-                                        fontSize = 9.5.sp,
-                                        lineHeight = 12.sp,
-                                        textAlign = TextAlign.Center,
-                                        modifier = Modifier.padding(horizontal = 4.dp, vertical = 4.dp)
-                                    )
+                                    Column(modifier = Modifier.padding(vertical = 10.dp, horizontal = 4.dp), horizontalAlignment = Alignment.CenterHorizontally) {
+                                        Text("🎯 Düzle", color = GoldWarm, fontSize = 10.sp, fontWeight = FontWeight.Bold)
+                                        Text("$${String.format(Locale.US, if (roundedPrice < 1.0) "%.4f" else if (entryPrice >= 100.0) "%.0f" else "%.2f", roundedPrice)}", color = TextPrimary, fontSize = 9.sp)
+                                    }
                                 }
                             }
 
@@ -2995,8 +3051,10 @@ fun LiveAssistantScreen(
 
             val currentPrice = if (asset.rawPrice > 0) asset.rawPrice else (oracle?.binanceGlobalPrice ?: 0.0)
 
-            // Limit order calculations
-            val entryLimitPrice = if (tech != null && tech.supportLevel > 0) tech.supportLevel else currentPrice * 0.985
+            // Smart AI Limit order calculations (Fast Trend, Balanced Support, Deep Dip)
+            val strategyAnalysis = AiAdvisorEngine.evaluateSmartEntryStrategies(asset, tech, currentPrice)
+            val recommendedPlan = strategyAnalysis.options.firstOrNull { it.isRecommended } ?: strategyAnalysis.options[0]
+            val entryLimitPrice = recommendedPlan.price
             val targetNetPercent = 2.5
             val targetExitPrice = entryLimitPrice * (1.0 + (targetNetPercent + 0.40) / 100.0)
             val rsiValue = tech?.rsi14 ?: 50.0
@@ -3085,7 +3143,12 @@ fun LiveAssistantScreen(
                             border = BorderStroke(1.dp, EmeraldProfit.copy(alpha = 0.5f))
                         ) {
                             Column(modifier = Modifier.padding(10.dp), verticalArrangement = Arrangement.spacedBy(2.dp)) {
-                                Text("🎯 PUSU LİMİT AL", color = EmeraldProfitBright, fontSize = 9.5.sp, fontWeight = FontWeight.Bold, fontFamily = FontFamily.Monospace)
+                                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(3.dp)) {
+                                    Text(recommendedPlan.title.uppercase(), color = EmeraldProfitBright, fontSize = 9.5.sp, fontWeight = FontWeight.Bold, fontFamily = FontFamily.Monospace)
+                                    Surface(color = GoldWarm, shape = RoundedCornerShape(3.dp)) {
+                                        Text("AI", color = Color.Black, fontSize = 7.sp, fontWeight = FontWeight.ExtraBold, modifier = Modifier.padding(horizontal = 2.5.dp, vertical = 0.5.dp))
+                                    }
+                                }
                                 Text(
                                     text = "$${String.format(Locale.US, if (entryLimitPrice < 1.0) "%.4f" else "%.2f", entryLimitPrice)}",
                                     color = TextPrimary,
@@ -3094,7 +3157,7 @@ fun LiveAssistantScreen(
                                     fontFamily = FontFamily.Monospace
                                 )
                                 Text(
-                                    text = if (distanceToEntryPct <= 0.3) "⚡ Pusu Eşiğinde!" else "%${String.format(Locale.US, "%.2f", distanceToEntryPct)} yukarıda",
+                                    text = if (distanceToEntryPct <= 0.3) "⚡ Pusu Eşiğinde!" else "%${String.format(Locale.US, "%.1f", distanceToEntryPct)} (${recommendedPlan.fillSpeedText})",
                                     color = if (distanceToEntryPct <= 0.3) EmeraldProfitBright else TextSecondary,
                                     fontSize = 9.5.sp
                                 )
