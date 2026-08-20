@@ -47,6 +47,34 @@ import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
 
+/**
+ * Universal robust number parser supporting Turkish formatting (comma decimals, dot thousands or vice versa).
+ * e.g., "44,73" -> 44.73, "64.681,22" -> 64681.22, "0,0001992" -> 0.0001992, "100" -> 100.0
+ */
+fun parseFlexibleDouble(input: String?): Double? {
+    if (input == null) return null
+    val clean = input.trim()
+    if (clean.isEmpty()) return null
+    return try {
+        if (clean.contains(".") && clean.contains(",")) {
+            if (clean.lastIndexOf(",") > clean.lastIndexOf(".")) {
+                // e.g. "64.681,22" -> remove '.' and replace ',' with '.'
+                clean.replace(".", "").replace(",", ".").toDoubleOrNull()
+            } else {
+                // e.g. "64,681.22" -> remove ','
+                clean.replace(",", "").toDoubleOrNull()
+            }
+        } else if (clean.contains(",")) {
+            // e.g. "44,73" or "0,0001992" -> replace ',' with '.'
+            clean.replace(",", ".").toDoubleOrNull()
+        } else {
+            clean.toDoubleOrNull()
+        }
+    } catch (e: Exception) {
+        null
+    }
+}
+
 class MainActivity : ComponentActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -531,33 +559,9 @@ fun AddExistingHoldingDialog(
         }
     }
 
-    // Helper to safely parse Turkish formatted numbers (e.g., "64.681,22" -> 64681.22, "0,0001992" -> 0.0001992)
-    fun parseNumberInput(input: String): Double {
-        val clean = input.trim()
-        if (clean.isEmpty()) return 0.0
-        return try {
-            if (clean.contains(".") && clean.contains(",")) {
-                if (clean.lastIndexOf(",") > clean.lastIndexOf(".")) {
-                    // e.g. "64.681,22" -> remove '.' and replace ',' with '.'
-                    clean.replace(".", "").replace(",", ".").toDouble()
-                } else {
-                    // e.g. "64,681.22" -> remove ','
-                    clean.replace(",", "").toDouble()
-                }
-            } else if (clean.contains(",")) {
-                // e.g. "0,0001992" or "64681,22" -> replace ',' with '.'
-                clean.replace(",", ".").toDouble()
-            } else {
-                clean.toDouble()
-            }
-        } catch (e: Exception) {
-            0.0
-        }
-    }
-
-    val entryPrice = parseNumberInput(entryPriceStr)
-    val coinAmount = parseNumberInput(coinAmountStr)
-    val targetProfitPct = parseNumberInput(targetProfitPctStr).takeIf { it > 0.0 } ?: 2.0
+    val entryPrice = parseFlexibleDouble(entryPriceStr) ?: 0.0
+    val coinAmount = parseFlexibleDouble(coinAmountStr) ?: 0.0
+    val targetProfitPct = (parseFlexibleDouble(targetProfitPctStr) ?: 2.0).takeIf { it > 0.0 } ?: 2.0
 
     // Calculations matching Midas
     val matchingAsset = assets.firstOrNull { it.symbol.equals(resolvedSymbol, ignoreCase = true) }
@@ -970,6 +974,7 @@ fun LiveAssistantScreen(
                 val pnlUsdt = (currentPrice - trade.entryPrice) * trade.coinAmount - trade.midasTotalFeeUsdt
                 val pnlPercent = if (trade.investedUsdt > 0) (pnlUsdt / trade.investedUsdt) * 100.0 else 0.0
                 val isTargetHit = currentPrice >= trade.targetExitPrice
+                val targetTotalReturnUsdt = trade.targetExitPrice * trade.coinAmount * 0.998 // after Midas exit fee
 
                 Surface(
                     modifier = Modifier.fillMaxWidth(),
@@ -977,7 +982,8 @@ fun LiveAssistantScreen(
                     shape = RoundedCornerShape(14.dp),
                     border = BorderStroke(1.2.dp, if (isTargetHit) EmeraldProfit else if (pnlUsdt >= 0) IceCyanBright else GoldWarm)
                 ) {
-                    Column(modifier = Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Column(modifier = Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                        // Header: Symbol, Status Pill, PnL
                         Row(
                             modifier = Modifier.fillMaxWidth(),
                             horizontalArrangement = Arrangement.SpaceBetween,
@@ -987,7 +993,7 @@ fun LiveAssistantScreen(
                                 Text(
                                     text = "${trade.symbol}/USDT",
                                     color = TextPrimary,
-                                    fontSize = 14.sp,
+                                    fontSize = 15.sp,
                                     fontWeight = FontWeight.ExtraBold,
                                     fontFamily = FontFamily.Monospace
                                 )
@@ -997,11 +1003,11 @@ fun LiveAssistantScreen(
                                     shape = RoundedCornerShape(6.dp)
                                 ) {
                                     Text(
-                                        text = if (isTargetHit) "🟢 SATIŞ VAKTİ (HEDEF VURULDU)" else if (pnlUsdt >= 0) "⏳ BEKLE (KÂRDA YÜKSELİYOR)" else "⏳ BEKLE (SPOT SABIR)",
+                                        text = if (isTargetHit) "🟢 SATIŞ VAKTİ (HEDEF DOLDU)" else if (pnlUsdt >= 0) "📈 KÂRDA YÜKSELİYOR" else "⏳ SPOT SABIR (0 ZARAR)",
                                         color = if (isTargetHit) Color.Black else if (pnlUsdt >= 0) IceCyanBright else GoldWarm,
                                         fontSize = 9.5.sp,
                                         fontWeight = FontWeight.ExtraBold,
-                                        modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
+                                        modifier = Modifier.padding(horizontal = 6.dp, vertical = 3.dp)
                                     )
                                 }
                             }
@@ -1009,51 +1015,103 @@ fun LiveAssistantScreen(
                             Text(
                                 text = "${if (pnlUsdt >= 0) "+" else ""}${String.format(Locale.US, "%.2f", pnlUsdt)} USDT (%${String.format(Locale.US, "%.2f", pnlPercent)})",
                                 color = if (pnlUsdt >= 0) EmeraldProfit else CoralRed,
-                                fontSize = 13.sp,
+                                fontSize = 13.5.sp,
                                 fontWeight = FontWeight.ExtraBold,
                                 fontFamily = FontFamily.Monospace
                             )
                         }
 
+                        // Summary Info Bar
                         Row(
                             modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.spacedBy(6.dp)
+                            horizontalArrangement = Arrangement.SpaceBetween
                         ) {
                             Text("Maliyet: $${String.format(Locale.US, "%.2f", trade.entryPrice)}", color = TextSecondary, fontSize = 11.sp, fontFamily = FontFamily.Monospace)
-                            Text("•", color = TextTertiary, fontSize = 11.sp)
-                            Text("Midas Satış Emri: $${String.format(Locale.US, "%.2f", trade.targetExitPrice)}", color = EmeraldProfitBright, fontSize = 11.sp, fontFamily = FontFamily.Monospace)
-                            Text("•", color = TextTertiary, fontSize = 11.sp)
-                            Text("Anlık: $${String.format(Locale.US, "%.2f", currentPrice)}", color = TextPrimary, fontSize = 11.sp, fontFamily = FontFamily.Monospace)
+                            Text("Adet: ${String.format(Locale.US, "%.6f", trade.coinAmount).trimEnd('0').trimEnd('.')} ${trade.symbol}", color = TextSecondary, fontSize = 11.sp, fontFamily = FontFamily.Monospace)
+                            Text("Anlık: $${String.format(Locale.US, "%.2f", currentPrice)}", color = IceCyanBright, fontSize = 11.sp, fontFamily = FontFamily.Monospace, fontWeight = FontWeight.Bold)
                         }
 
-                        Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                            OutlinedButton(
-                                onClick = {
-                                    val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
-                                    val clip = ClipData.newPlainText("${trade.symbol} Satış", String.format(Locale.US, "%.2f", trade.targetExitPrice))
-                                    clipboard.setPrimaryClip(clip)
-                                    Toast.makeText(context, "🔴 Satış Fiyatı Kopyalandı: $${String.format(Locale.US, "%.2f", trade.targetExitPrice)}", Toast.LENGTH_SHORT).show()
-                                },
-                                modifier = Modifier.weight(1f).height(34.dp),
-                                shape = RoundedCornerShape(6.dp),
-                                colors = ButtonDefaults.outlinedButtonColors(contentColor = CoralRedBright),
-                                border = BorderStroke(1.dp, CoralRed)
-                            ) {
-                                Icon(Icons.Default.ContentCopy, contentDescription = null, modifier = Modifier.size(12.dp))
-                                Spacer(modifier = Modifier.width(3.dp))
-                                Text("Satışı Kopyala", fontSize = 9.5.sp, fontWeight = FontWeight.Bold)
+                        // EXPLICIT MIDAS LIMIT ORDER INSTRUCTION BOX
+                        Surface(
+                            modifier = Modifier.fillMaxWidth(),
+                            color = if (isTargetHit) EmeraldProfit.copy(alpha = 0.12f) else ObsidianBg,
+                            shape = RoundedCornerShape(10.dp),
+                            border = BorderStroke(1.dp, if (isTargetHit) EmeraldProfit else ObsidianBorder)
+                        ) {
+                            Column(modifier = Modifier.padding(10.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                                Text(
+                                    text = if (isTargetHit) "🎉 HEDEF AŞILDI! MİDAS SATIŞ EMRİNİZİ KONTROL EDİN:" else "📢 MİDAS'TA GİRİLECEK LİMİT SATIŞ EMRİ:",
+                                    color = if (isTargetHit) EmeraldProfitBright else GoldWarm,
+                                    fontSize = 10.5.sp,
+                                    fontWeight = FontWeight.ExtraBold,
+                                    fontFamily = FontFamily.Monospace
+                                )
+                                Row(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    horizontalArrangement = Arrangement.SpaceBetween
+                                ) {
+                                    Text("Limit Satış Fiyatı:", color = TextSecondary, fontSize = 11.sp)
+                                    Text(
+                                        text = "$${String.format(Locale.US, if (trade.targetExitPrice < 1.0) "%.4f" else "%.2f", trade.targetExitPrice)} USDT",
+                                        color = EmeraldProfitBright,
+                                        fontSize = 12.sp,
+                                        fontWeight = FontWeight.ExtraBold,
+                                        fontFamily = FontFamily.Monospace
+                                    )
+                                }
+                                Row(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    horizontalArrangement = Arrangement.SpaceBetween
+                                ) {
+                                    Text("Satılacak Varlık Miktarı:", color = TextSecondary, fontSize = 11.sp)
+                                    Text(
+                                        text = "${String.format(Locale.US, "%.6f", trade.coinAmount).trimEnd('0').trimEnd('.')} ${trade.symbol} (Tümü)",
+                                        color = TextPrimary,
+                                        fontSize = 11.sp,
+                                        fontWeight = FontWeight.Bold,
+                                        fontFamily = FontFamily.Monospace
+                                    )
+                                }
+                                Row(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    horizontalArrangement = Arrangement.SpaceBetween
+                                ) {
+                                    Text("Satışta Kasanıza Geçecek:", color = TextSecondary, fontSize = 11.sp)
+                                    Text(
+                                        text = "~$${String.format(Locale.US, "%.2f", targetTotalReturnUsdt)} USDT",
+                                        color = EmeraldProfit,
+                                        fontSize = 11.sp,
+                                        fontWeight = FontWeight.Bold
+                                    )
+                                }
                             }
+                        }
 
-                            Button(
-                                onClick = { onCloseTrade(trade.id, currentPrice) },
-                                modifier = Modifier.weight(1f).height(34.dp),
-                                shape = RoundedCornerShape(6.dp),
-                                colors = ButtonDefaults.buttonColors(containerColor = EmeraldProfit, contentColor = Color.Black)
-                            ) {
-                                Icon(Icons.Default.Check, contentDescription = null, modifier = Modifier.size(13.dp))
-                                Spacer(modifier = Modifier.width(3.dp))
-                                Text("Satıldı & Kapat", fontSize = 9.5.sp, fontWeight = FontWeight.Bold)
-                            }
+                        // SINGLE PROMINENT ACTION BUTTON
+                        Button(
+                            onClick = { onCloseTrade(trade.id, currentPrice) },
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .height(40.dp),
+                            shape = RoundedCornerShape(8.dp),
+                            colors = ButtonDefaults.buttonColors(
+                                containerColor = if (isTargetHit) EmeraldProfit else ObsidianCardElevated,
+                                contentColor = if (isTargetHit) Color.Black else TextPrimary
+                            ),
+                            border = BorderStroke(1.dp, if (isTargetHit) EmeraldProfit else ObsidianBorder)
+                        ) {
+                            Icon(
+                                Icons.Default.CheckCircle,
+                                contentDescription = null,
+                                modifier = Modifier.size(16.dp),
+                                tint = if (isTargetHit) Color.Black else EmeraldProfit
+                            )
+                            Spacer(modifier = Modifier.width(6.dp))
+                            Text(
+                                text = if (isTargetHit) "✅ Midas'ta Satıldı & Kârı Kasaya Al" else "Midas'ta Satış Tamamlandıysa Kapat",
+                                fontSize = 11.5.sp,
+                                fontWeight = FontWeight.Bold
+                            )
                         }
                     }
                 }
@@ -1231,69 +1289,58 @@ fun LiveAssistantScreen(
                         }
                     }
 
-                    // ACTION BUTTONS (Copy Buy, Copy Sell, Track Trade with Budget Approval)
-                    Row(
+                    // EXPLICIT LIMIT ORDERS INSTRUCTION BOX
+                    Surface(
                         modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.spacedBy(6.dp)
+                        color = ObsidianBg,
+                        shape = RoundedCornerShape(10.dp),
+                        border = BorderStroke(0.8.dp, ObsidianBorder)
                     ) {
-                        OutlinedButton(
-                            onClick = {
-                                val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
-                                val clip = ClipData.newPlainText(
-                                    "${asset.symbol} Limit Alış",
-                                    String.format(Locale.US, if (entryLimitPrice < 1.0) "%.4f" else "%.2f", entryLimitPrice)
+                        Column(modifier = Modifier.padding(10.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                            Text("📢 MİDAS'TA GİRİLECEK EMİRLER:", color = IceCyanBright, fontSize = 10.sp, fontWeight = FontWeight.ExtraBold, fontFamily = FontFamily.Monospace)
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.SpaceBetween
+                            ) {
+                                Text("1. Limit Alış Emri:", color = EmeraldProfitBright, fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                                Text(
+                                    text = "$${String.format(Locale.US, if (entryLimitPrice < 1.0) "%.4f" else "%.2f", entryLimitPrice)} USDT",
+                                    color = TextPrimary,
+                                    fontSize = 11.5.sp,
+                                    fontWeight = FontWeight.ExtraBold,
+                                    fontFamily = FontFamily.Monospace
                                 )
-                                clipboard.setPrimaryClip(clip)
-                                Toast.makeText(context, "🟢 Alış Fiyatı Kopyalandı: $${String.format(Locale.US, "%.2f", entryLimitPrice)}", Toast.LENGTH_SHORT).show()
-                            },
-                            modifier = Modifier
-                                .weight(1f)
-                                .height(38.dp),
-                            shape = RoundedCornerShape(8.dp),
-                            colors = ButtonDefaults.outlinedButtonColors(contentColor = EmeraldProfit),
-                            border = BorderStroke(1.dp, EmeraldProfit)
-                        ) {
-                            Icon(imageVector = Icons.Default.ContentCopy, contentDescription = null, modifier = Modifier.size(13.dp))
-                            Spacer(modifier = Modifier.width(3.dp))
-                            Text("Alışı Kopyala", fontSize = 10.sp, fontWeight = FontWeight.Bold)
-                        }
-
-                        OutlinedButton(
-                            onClick = {
-                                val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
-                                val clip = ClipData.newPlainText(
-                                    "${asset.symbol} Limit Satış",
-                                    String.format(Locale.US, if (targetExitPrice < 1.0) "%.4f" else "%.2f", targetExitPrice)
+                            }
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.SpaceBetween
+                            ) {
+                                Text("2. Limit Satış Emri:", color = CoralRedBright, fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                                Text(
+                                    text = "$${String.format(Locale.US, if (targetExitPrice < 1.0) "%.4f" else "%.2f", targetExitPrice)} USDT (+%${String.format(Locale.US, "%.1f", targetNetPercent)} Net)",
+                                    color = EmeraldProfitBright,
+                                    fontSize = 11.5.sp,
+                                    fontWeight = FontWeight.ExtraBold,
+                                    fontFamily = FontFamily.Monospace
                                 )
-                                clipboard.setPrimaryClip(clip)
-                                Toast.makeText(context, "🔴 Satış Fiyatı Kopyalandı: $${String.format(Locale.US, "%.2f", targetExitPrice)}", Toast.LENGTH_SHORT).show()
-                            },
-                            modifier = Modifier
-                                .weight(1f)
-                                .height(38.dp),
-                            shape = RoundedCornerShape(8.dp),
-                            colors = ButtonDefaults.outlinedButtonColors(contentColor = CoralRedBright),
-                            border = BorderStroke(1.dp, CoralRed)
-                        ) {
-                            Icon(imageVector = Icons.Default.ContentCopy, contentDescription = null, modifier = Modifier.size(13.dp))
-                            Spacer(modifier = Modifier.width(3.dp))
-                            Text("Satışı Kopyala", fontSize = 10.sp, fontWeight = FontWeight.Bold)
+                            }
                         }
+                    }
 
-                        Button(
-                            onClick = {
-                                onOpenBudgetProposal(asset)
-                            },
-                            modifier = Modifier
-                                .weight(1f)
-                                .height(38.dp),
-                            shape = RoundedCornerShape(8.dp),
-                            colors = ButtonDefaults.buttonColors(containerColor = IceCyanBright, contentColor = Color.Black)
-                        ) {
-                            Icon(imageVector = Icons.Default.Shield, contentDescription = null, modifier = Modifier.size(14.dp))
-                            Spacer(modifier = Modifier.width(3.dp))
-                            Text("Bütçe Ayır", fontSize = 10.sp, fontWeight = FontWeight.ExtraBold)
-                        }
+                    // ACTION BUTTON: Track Trade with Budget Approval
+                    Button(
+                        onClick = {
+                            onOpenBudgetProposal(asset)
+                        },
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(40.dp),
+                        shape = RoundedCornerShape(8.dp),
+                        colors = ButtonDefaults.buttonColors(containerColor = IceCyanBright, contentColor = Color.Black)
+                    ) {
+                        Icon(imageVector = Icons.Default.Shield, contentDescription = null, modifier = Modifier.size(16.dp))
+                        Spacer(modifier = Modifier.width(6.dp))
+                        Text("💼 Bu Pozisyona Kasa Bütçesi Ayır & Başlat", fontSize = 11.5.sp, fontWeight = FontWeight.ExtraBold)
                     }
                 }
             }
@@ -1387,9 +1434,11 @@ fun CapitalAndPortfolioScreen(
                             OutlinedTextField(
                                 value = cashInput,
                                 onValueChange = { cashInput = it },
-                                label = { Text("Yeni USDT Bakiyesi") },
+                                label = { Text("Yeni USDT Bakiyesi", fontSize = 11.sp) },
+                                placeholder = { Text("Örn: 44.73 veya 44,73", fontSize = 11.sp) },
                                 modifier = Modifier.weight(1f),
                                 singleLine = true,
+                                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
                                 colors = OutlinedTextFieldDefaults.colors(
                                     focusedBorderColor = IceCyanBright,
                                     unfocusedBorderColor = ObsidianBorder,
@@ -1399,10 +1448,12 @@ fun CapitalAndPortfolioScreen(
                             )
                             Button(
                                 onClick = {
-                                    val newCash = cashInput.toDoubleOrNull()
-                                    if (newCash != null) {
+                                    val newCash = parseFlexibleDouble(cashInput)
+                                    if (newCash != null && newCash >= 0.0) {
                                         onUpdateCash(newCash)
                                         isEditingCash = false
+                                    } else {
+                                        Toast.makeText(context, "Lütfen geçerli bir tutar girin (Örn: 44.73)", Toast.LENGTH_SHORT).show()
                                     }
                                 },
                                 shape = RoundedCornerShape(8.dp),
@@ -1509,6 +1560,7 @@ fun CapitalAndPortfolioScreen(
                 val pnlUsdt = (currentPrice - trade.entryPrice) * trade.coinAmount - trade.midasTotalFeeUsdt
                 val pnlPercent = if (trade.investedUsdt > 0) (pnlUsdt / trade.investedUsdt) * 100.0 else 0.0
                 val isTargetHit = currentPrice >= trade.targetExitPrice
+                val targetTotalReturnUsdt = trade.targetExitPrice * trade.coinAmount * 0.998
 
                 val tech = techMap[trade.symbol]
                 val canDca = trade.dcaLevel < trade.maxDcaLevels && currentCash >= 15.0 && tech != null && currentPrice < trade.entryPrice * 0.985
@@ -1517,9 +1569,9 @@ fun CapitalAndPortfolioScreen(
                     modifier = Modifier.fillMaxWidth(),
                     color = ObsidianSurface,
                     shape = RoundedCornerShape(14.dp),
-                    border = BorderStroke(1.dp, if (isTargetHit) EmeraldProfit else if (pnlUsdt >= 0) IceCyanBright else CoralRed)
+                    border = BorderStroke(1.2.dp, if (isTargetHit) EmeraldProfit else if (pnlUsdt >= 0) IceCyanBright else GoldWarm)
                 ) {
-                    Column(modifier = Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Column(modifier = Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
                         Row(
                             modifier = Modifier.fillMaxWidth(),
                             horizontalArrangement = Arrangement.SpaceBetween,
@@ -1528,8 +1580,8 @@ fun CapitalAndPortfolioScreen(
                             Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                                 Text(
                                     text = "${trade.symbol}/USDT",
-                                    color = IceCyanBright,
-                                    fontSize = 14.sp,
+                                    color = TextPrimary,
+                                    fontSize = 15.sp,
                                     fontWeight = FontWeight.ExtraBold,
                                     fontFamily = FontFamily.Monospace
                                 )
@@ -1538,11 +1590,11 @@ fun CapitalAndPortfolioScreen(
                                     shape = RoundedCornerShape(6.dp)
                                 ) {
                                     Text(
-                                        text = if (isTargetHit) "🟢 SATIŞ VAKTİ" else "Kademe ${trade.dcaLevel}/${trade.maxDcaLevels}",
+                                        text = if (isTargetHit) "🟢 SATIŞ VAKTİ (HEDEF DOLDU)" else "Kademe ${trade.dcaLevel}/${trade.maxDcaLevels}",
                                         color = if (isTargetHit) Color.Black else if (trade.dcaLevel == 1) EmeraldProfitBright else GoldWarm,
                                         fontSize = 9.5.sp,
                                         fontWeight = FontWeight.Bold,
-                                        modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
+                                        modifier = Modifier.padding(horizontal = 6.dp, vertical = 3.dp)
                                     )
                                 }
                             }
@@ -1550,7 +1602,7 @@ fun CapitalAndPortfolioScreen(
                             Text(
                                 text = "${if (pnlUsdt >= 0) "+" else ""}${String.format(Locale.US, "%.2f", pnlUsdt)} USDT (%${String.format(Locale.US, "%.2f", pnlPercent)})",
                                 color = if (pnlUsdt >= 0) EmeraldProfit else CoralRed,
-                                fontSize = 13.sp,
+                                fontSize = 13.5.sp,
                                 fontWeight = FontWeight.ExtraBold,
                                 fontFamily = FontFamily.Monospace
                             )
@@ -1558,13 +1610,67 @@ fun CapitalAndPortfolioScreen(
 
                         Row(
                             modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.spacedBy(6.dp)
+                            horizontalArrangement = Arrangement.SpaceBetween
                         ) {
                             Text("Maliyet: $${String.format(Locale.US, "%.2f", trade.entryPrice)}", color = TextSecondary, fontSize = 11.sp, fontFamily = FontFamily.Monospace)
-                            Text("•", color = TextTertiary, fontSize = 11.sp)
-                            Text("Hedef: $${String.format(Locale.US, "%.2f", trade.targetExitPrice)}", color = EmeraldProfitBright, fontSize = 11.sp, fontFamily = FontFamily.Monospace)
-                            Text("•", color = TextTertiary, fontSize = 11.sp)
-                            Text("Anlık: $${String.format(Locale.US, "%.2f", currentPrice)}", color = TextPrimary, fontSize = 11.sp, fontFamily = FontFamily.Monospace)
+                            Text("Adet: ${String.format(Locale.US, "%.6f", trade.coinAmount).trimEnd('0').trimEnd('.')} ${trade.symbol}", color = TextSecondary, fontSize = 11.sp, fontFamily = FontFamily.Monospace)
+                            Text("Anlık: $${String.format(Locale.US, "%.2f", currentPrice)}", color = IceCyanBright, fontSize = 11.sp, fontFamily = FontFamily.Monospace, fontWeight = FontWeight.Bold)
+                        }
+
+                        // EXPLICIT MIDAS LIMIT ORDER INSTRUCTION BOX
+                        Surface(
+                            modifier = Modifier.fillMaxWidth(),
+                            color = if (isTargetHit) EmeraldProfit.copy(alpha = 0.12f) else ObsidianBg,
+                            shape = RoundedCornerShape(10.dp),
+                            border = BorderStroke(1.dp, if (isTargetHit) EmeraldProfit else ObsidianBorder)
+                        ) {
+                            Column(modifier = Modifier.padding(10.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                                Text(
+                                    text = if (isTargetHit) "🎉 HEDEF DOLDU! MİDAS SATIŞ EMRİNİZİ KONTROL EDİN:" else "📢 MİDAS'TA GİRİLECEK LİMİT SATIŞ EMRİ:",
+                                    color = if (isTargetHit) EmeraldProfitBright else GoldWarm,
+                                    fontSize = 10.5.sp,
+                                    fontWeight = FontWeight.ExtraBold,
+                                    fontFamily = FontFamily.Monospace
+                                )
+                                Row(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    horizontalArrangement = Arrangement.SpaceBetween
+                                ) {
+                                    Text("Limit Satış Fiyatı:", color = TextSecondary, fontSize = 11.sp)
+                                    Text(
+                                        text = "$${String.format(Locale.US, if (trade.targetExitPrice < 1.0) "%.4f" else "%.2f", trade.targetExitPrice)} USDT",
+                                        color = EmeraldProfitBright,
+                                        fontSize = 12.sp,
+                                        fontWeight = FontWeight.ExtraBold,
+                                        fontFamily = FontFamily.Monospace
+                                    )
+                                }
+                                Row(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    horizontalArrangement = Arrangement.SpaceBetween
+                                ) {
+                                    Text("Satılacak Varlık Miktarı:", color = TextSecondary, fontSize = 11.sp)
+                                    Text(
+                                        text = "${String.format(Locale.US, "%.6f", trade.coinAmount).trimEnd('0').trimEnd('.')} ${trade.symbol} (Tümü)",
+                                        color = TextPrimary,
+                                        fontSize = 11.sp,
+                                        fontWeight = FontWeight.Bold,
+                                        fontFamily = FontFamily.Monospace
+                                    )
+                                }
+                                Row(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    horizontalArrangement = Arrangement.SpaceBetween
+                                ) {
+                                    Text("Satışta Kasanıza Geçecek:", color = TextSecondary, fontSize = 11.sp)
+                                    Text(
+                                        text = "~$${String.format(Locale.US, "%.2f", targetTotalReturnUsdt)} USDT",
+                                        color = EmeraldProfit,
+                                        fontSize = 11.sp,
+                                        fontWeight = FontWeight.Bold
+                                    )
+                                }
+                            }
                         }
 
                         // DCA button if dip opportunity exists
@@ -1576,44 +1682,36 @@ fun CapitalAndPortfolioScreen(
                                 },
                                 modifier = Modifier
                                     .fillMaxWidth()
-                                    .height(34.dp),
-                                shape = RoundedCornerShape(6.dp),
+                                    .height(38.dp),
+                                shape = RoundedCornerShape(8.dp),
                                 colors = ButtonDefaults.buttonColors(containerColor = GoldContainer, contentColor = GoldWarm)
                             ) {
-                                Icon(Icons.Default.AddCircleOutline, contentDescription = null, modifier = Modifier.size(14.dp))
+                                Icon(Icons.Default.AddCircleOutline, contentDescription = null, modifier = Modifier.size(15.dp))
                                 Spacer(modifier = Modifier.width(4.dp))
-                                Text("${trade.dcaLevel + 1}. Kademeyi Ekle (Maliyet Düşür: $${String.format(Locale.US, "%.2f", tech.supportLevel)})", fontSize = 10.5.sp, fontWeight = FontWeight.Bold)
+                                Text("➕ ${trade.dcaLevel + 1}. Kademeyi Ekle (Midas Limit Alış: $${String.format(Locale.US, "%.2f", tech.supportLevel)} USDT)", fontSize = 10.5.sp, fontWeight = FontWeight.Bold)
                             }
                         }
 
-                        Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                            OutlinedButton(
-                                onClick = {
-                                    val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
-                                    val clip = ClipData.newPlainText("${trade.symbol} Satış", String.format(Locale.US, "%.2f", trade.targetExitPrice))
-                                    clipboard.setPrimaryClip(clip)
-                                    Toast.makeText(context, "🔴 Satış Fiyatı Kopyalandı: $${String.format(Locale.US, "%.2f", trade.targetExitPrice)}", Toast.LENGTH_SHORT).show()
-                                },
-                                modifier = Modifier.weight(1f).height(34.dp),
-                                shape = RoundedCornerShape(6.dp),
-                                colors = ButtonDefaults.outlinedButtonColors(contentColor = CoralRedBright),
-                                border = BorderStroke(1.dp, CoralRed)
-                            ) {
-                                Icon(Icons.Default.ContentCopy, contentDescription = null, modifier = Modifier.size(12.dp))
-                                Spacer(modifier = Modifier.width(3.dp))
-                                Text("Satışı Kopyala", fontSize = 9.5.sp, fontWeight = FontWeight.Bold)
-                            }
-
-                            Button(
-                                onClick = { onCloseTrade(trade.id, currentPrice) },
-                                modifier = Modifier.weight(1f).height(34.dp),
-                                shape = RoundedCornerShape(6.dp),
-                                colors = ButtonDefaults.buttonColors(containerColor = EmeraldProfit, contentColor = Color.Black)
-                            ) {
-                                Icon(Icons.Default.Check, contentDescription = null, modifier = Modifier.size(13.dp))
-                                Spacer(modifier = Modifier.width(3.dp))
-                                Text("Satıldı & Kapat", fontSize = 9.5.sp, fontWeight = FontWeight.Bold)
-                            }
+                        // Prominent Action Button
+                        Button(
+                            onClick = { onCloseTrade(trade.id, currentPrice) },
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .height(40.dp),
+                            shape = RoundedCornerShape(8.dp),
+                            colors = ButtonDefaults.buttonColors(
+                                containerColor = if (isTargetHit) EmeraldProfit else ObsidianCardElevated,
+                                contentColor = if (isTargetHit) Color.Black else TextPrimary
+                            ),
+                            border = BorderStroke(1.dp, if (isTargetHit) EmeraldProfit else ObsidianBorder)
+                        ) {
+                            Icon(Icons.Default.CheckCircle, contentDescription = null, modifier = Modifier.size(16.dp), tint = if (isTargetHit) Color.Black else EmeraldProfit)
+                            Spacer(modifier = Modifier.width(6.dp))
+                            Text(
+                                text = if (isTargetHit) "✅ Midas'ta Satıldı & Kârı Kasaya Al" else "Midas'ta Satış Tamamlandıysa Kapat",
+                                fontSize = 11.5.sp,
+                                fontWeight = FontWeight.Bold
+                            )
                         }
                     }
                 }

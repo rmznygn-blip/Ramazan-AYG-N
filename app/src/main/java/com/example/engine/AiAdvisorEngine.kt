@@ -69,9 +69,9 @@ object AiAdvisorEngine {
                     title = "🎯 HEDEF SATIŞ FİYATINA ULAŞILDI!",
                     statusBadge = "KÂR REALİZASYONU (+%${String.format(Locale.US, "%.2f", pnlPercent)} NET)",
                     statusColorHex = 0xFF00FF9D,
-                    step1 = "1. ${trade.symbol}/USDT anlık fiyatı ($${String.format(Locale.US, "%.2f", currentPrice)}), belirlediğimiz $${String.format(Locale.US, "%.2f", trade.targetExitPrice)} hedef çıkışına ulaştı!",
-                    step2 = "2. Midas'taki limit satış emrinizin gerçekleştiğini kontrol edin.",
-                    step3 = "3. Aşağıdaki 'Kârı Kasaya Al & Kapat' butonuna basarak net kârınızı (+${String.format(Locale.US, "%.2f", pnlUsdt)} USDT) ana kasanıza aktarın.",
+                    step1 = "1. ${trade.symbol}/USDT anlık fiyatı ($${String.format(Locale.US, "%.2f", currentPrice)}), belirlediğimiz $${String.format(Locale.US, "%.2f", trade.targetExitPrice)} USDT hedef satışını geçti!",
+                    step2 = "2. Midas hesabınızı kontrol edin: $${String.format(Locale.US, "%.2f", trade.targetExitPrice)} USDT limit satış emriniz gerçekleşmiştir.",
+                    step3 = "3. Aşağıdaki 'Satıldı & Kapat (Kârı Kasaya Al)' butonuna basarak kasanızı güncelleyin.",
                     targetSymbol = trade.symbol,
                     recommendedExitPrice = trade.targetExitPrice,
                     reasoning = "5 dakikalık hedef direnç testi başarıyla tamamlandı. Sıfır zarar prensibi korundu."
@@ -81,18 +81,18 @@ object AiAdvisorEngine {
                 val isDcaPossible = trade.dcaLevel < trade.maxDcaLevels && cash >= 15.0 && tech != null && currentPrice < trade.entryPrice * 0.985
 
                 val dcaNote = if (isDcaPossible) {
-                    " (Kademe ${trade.dcaLevel}/${trade.maxDcaLevels}: ${String.format(Locale.US, "%.2f", tech!!.supportLevel)} seviyesinden kademeli alım yapılabilir)"
+                    " (Maliyet Düşürme: $${String.format(Locale.US, "%.2f", tech!!.supportLevel)} USDT seviyesinden ${trade.dcaLevel + 1}. kademe limit alış girilebilir)"
                 } else if (trade.dcaLevel >= trade.maxDcaLevels) {
-                    " (3/3 Kademe Tamamlandı - İlave ekleme yapılmaz, sadece kârlı çıkış beklenir)"
+                    " (3/3 Kademe Tamamlandı - İlave alım yapılmaz, sadece kârlı satış beklenir)"
                 } else ""
 
                 return ActionGuidance(
                     title = "⏳ SPOT SABIR MODU: ${trade.symbol}/USDT BEKLENİYOR",
                     statusBadge = if (pnlUsdt >= 0) "KÂRDA (+${String.format(Locale.US, "%.2f", pnlUsdt)} USDT)" else "DİPTE BEKLEMEDE (${String.format(Locale.US, "%.2f", pnlUsdt)} USDT)",
                     statusColorHex = if (pnlUsdt >= 0) 0xFF00FF9D else 0xFFFFB800,
-                    step1 = "1. Maliyetiniz: $${String.format(Locale.US, "%.2f", trade.entryPrice)} | Hedef Satış: $${String.format(Locale.US, "%.2f", trade.targetExitPrice)}",
+                    step1 = "1. MİDAS'TA GİRİLECEK LİMİT SATIŞ: $${String.format(Locale.US, "%.2f", trade.targetExitPrice)} USDT fiyatından satış emrinizi açık tutun.",
                     step2 = "2. Kuralımız: KESİNLİKLE ZARARINA SATIŞ YOK. Spot varlıkta sabırla beklenir.$dcaNote",
-                    step3 = "3. Midas'taki kârlı Limit Satış emrinizi açık tutun. Hedefe %${String.format(Locale.US, "%.2f", ((trade.targetExitPrice - currentPrice) / currentPrice) * 100.0)} kaldı.",
+                    step3 = "3. Hedefe %${String.format(Locale.US, "%.2f", ((trade.targetExitPrice - currentPrice) / currentPrice).coerceAtLeast(0.0) * 100.0)} kaldı. Satış dolunca 'Satıldı & Kapat' butonuna basın.",
                     targetSymbol = trade.symbol,
                     recommendedExitPrice = trade.targetExitPrice,
                     reasoning = "Sıfır zarar stratejisi: Spot varlıkta panik satışı yapılmaz, kârlı limit emrin dolması beklenir."
@@ -124,9 +124,9 @@ object AiAdvisorEngine {
                 title = "⚡ 5 DAKİKALIK DİP ALIM FIRSATI: ${asset.symbol}/USDT",
                 statusBadge = "GÜÇLÜ SİNYAL (SKOR: %$highestScore)",
                 statusColorHex = 0xFF00FF9D,
-                step1 = "1. Midas Kripto uygulamasını açın ve ${asset.symbol}/USDT paritesine gidin.",
-                step2 = "2. 'Alış Fiyatını Kopyala' butonuna basıp $${String.format(Locale.US, if (entryLimit < 1.0) "%.4f" else "%.2f", entryLimit)} fiyatına Limit Alış girin.",
-                step3 = "3. Alım gerçekleştiğinde 'Satış Fiyatını Kopyala' butonuyla $${String.format(Locale.US, if (targetExit < 1.0) "%.4f" else "%.2f", targetExit)} fiyatına Limit Satış koyun.",
+                step1 = "1. Midas Kripto'da ${asset.symbol}/USDT için $${String.format(Locale.US, if (entryLimit < 1.0) "%.4f" else "%.2f", entryLimit)} USDT fiyatından Limit Alış emri girin.",
+                step2 = "2. Alım emriniz gerçekleştiği anda Midas'ta $${String.format(Locale.US, if (targetExit < 1.0) "%.4f" else "%.2f", targetExit)} USDT fiyatından Limit Satış emri oluşturun.",
+                step3 = "3. Satış gerçekleştiğinde net +%2.0 kâr tahsil edilecektir.",
                 targetSymbol = asset.symbol,
                 recommendedEntryPrice = entryLimit,
                 recommendedExitPrice = targetExit,
