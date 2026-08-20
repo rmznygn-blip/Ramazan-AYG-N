@@ -2,6 +2,7 @@ package com.example
 
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onRoot
+import com.example.data.local.AppTradeEntity
 import com.example.ui.theme.MyApplicationTheme
 import com.github.takahirom.roborazzi.RobolectricDeviceQualifiers
 import com.github.takahirom.roborazzi.captureRoboImage
@@ -21,9 +22,25 @@ class GreetingScreenshotTest {
 
   @Test
   fun greeting_screenshot() {
+    val samplePendingTrade = AppTradeEntity(
+        symbol = "SOL",
+        entryPrice = 188.50,
+        targetExitPrice = 193.00,
+        investedUsdt = 30.0,
+        coinAmount = 0.1588,
+        status = "PENDING_BUY",
+        ambushTimeoutMinutes = 45
+    )
+
     composeTestRule.setContent {
       MyApplicationTheme {
-        CryptoTraderTopBar(isOverlayRunning = true, isAccessibilityActive = true)
+        PendingAmbushCard(
+            trade = samplePendingTrade,
+            currentPrice = 189.20,
+            onRequestConfirmFill = {},
+            onCancelAmbush = {},
+            onExtendTimeout = {}
+        )
       }
     }
 

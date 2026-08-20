@@ -11,6 +11,7 @@ import androidx.activity.enableEdgeToEdge
 import androidx.compose.animation.*
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
@@ -42,6 +43,7 @@ import com.example.model.CryptoAsset
 import com.example.model.TechnicalAnalysis5m
 import com.example.repository.CryptoMarketRepository
 import com.example.ui.theme.*
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import java.text.SimpleDateFormat
 import java.util.Date
@@ -108,6 +110,7 @@ fun CryptoAnalystMasterApp() {
     // Persistent database state
     val capitalProfile by dao.getCapitalProfileFlow().collectAsState(initial = CapitalProfileEntity())
     val activeTrades by dao.getActiveTradesFlow().collectAsState(initial = emptyList())
+    val pendingTrades by dao.getPendingTradesFlow().collectAsState(initial = emptyList())
     val historicalTrades by dao.getHistoricalTradesFlow().collectAsState(initial = emptyList())
     val coinMemories by dao.getAllCoinMemoriesFlow().collectAsState(initial = emptyList())
     val weeklyReports by dao.getAllWeeklyReportsFlow().collectAsState(initial = emptyList())
@@ -119,6 +122,9 @@ fun CryptoAnalystMasterApp() {
 
     // Dialog state for adding existing Midas holdings
     var showAddExistingHoldingDialog by remember { mutableStateOf(false) }
+
+    // Dialog state for confirming fill of pending ambush buy
+    var tradeToConfirmFill by remember { mutableStateOf<AppTradeEntity?>(null) }
 
     // Dialog state for confirming sale price with user & calculating exact return
     var tradeToConfirmSale by remember { mutableStateOf<Pair<AppTradeEntity, Double>?>(null) }
@@ -136,10 +142,11 @@ fun CryptoAnalystMasterApp() {
     var showResetAllConfirmDialog by remember { mutableStateOf(false) }
 
     // Realtime AI action guidance synthesized across capital + live 5m indicators
-    val realtimeGuidance = remember(capitalProfile, activeTrades, cryptoAssets, binanceOracleMap, technicalAnalysisMap) {
+    val realtimeGuidance = remember(capitalProfile, activeTrades, pendingTrades, cryptoAssets, binanceOracleMap, technicalAnalysisMap) {
         AiAdvisorEngine.computeRealtimeGuidance(
             capitalProfile = capitalProfile,
             activeTrades = activeTrades,
+            pendingTrades = pendingTrades,
             assets = cryptoAssets,
             oracleMap = binanceOracleMap,
             techMap = technicalAnalysisMap
@@ -284,9 +291,13 @@ fun CryptoAnalystMasterApp() {
                     icon = {
                         BadgedBox(
                             badge = {
-                                if (activeTrades.isNotEmpty()) {
-                                    Badge(containerColor = EmeraldProfit, contentColor = Color.Black) {
-                                        Text("${activeTrades.size}")
+                                val totalActiveCount = activeTrades.size + pendingTrades.size
+                                if (totalActiveCount > 0) {
+                                    Badge(
+                                        containerColor = if (pendingTrades.isNotEmpty()) GoldWarm else EmeraldProfit,
+                                        contentColor = Color.Black
+                                    ) {
+                                        Text("$totalActiveCount")
                                     }
                                 }
                             }
@@ -355,6 +366,7 @@ fun CryptoAnalystMasterApp() {
                     guidance = realtimeGuidance,
                     capitalProfile = capitalProfile,
                     activeTrades = activeTrades,
+                    pendingTrades = pendingTrades,
                     assets = cryptoAssets,
                     oracleMap = binanceOracleMap,
                     techMap = technicalAnalysisMap,
@@ -370,6 +382,23 @@ fun CryptoAnalystMasterApp() {
                     },
                     onOpenAddExistingDialog = {
                         showAddExistingHoldingDialog = true
+                    },
+                    onRequestConfirmFill = { trade ->
+                        tradeToConfirmFill = trade
+                    },
+                    onCancelAmbush = { tradeId ->
+                        coroutineScope.launch {
+                            val cancelled = AiAdvisorEngine.cancelPendingAmbush(dao, tradeId, "Kullanıcı tarafından iptal edildi")
+                            if (cancelled != null) {
+                                Toast.makeText(context, "❌ ${cancelled.symbol} Pusu Emri İptal Edildi. Rezerve bakiye kasaya iade edildi.", Toast.LENGTH_SHORT).show()
+                            }
+                        }
+                    },
+                    onExtendTimeout = { tradeId ->
+                        coroutineScope.launch {
+                            AiAdvisorEngine.extendAmbushTimeout(dao, tradeId, 30)
+                            Toast.makeText(context, "⏱️ Pusu Süresi +30 Dk Uzatıldı", Toast.LENGTH_SHORT).show()
+                        }
                     },
                     onRequestConfirmSale = { trade, currentPrice ->
                         tradeToConfirmSale = Pair(trade, currentPrice)
@@ -389,10 +418,28 @@ fun CryptoAnalystMasterApp() {
                 1 -> CapitalAndPortfolioScreen(
                     capitalProfile = capitalProfile,
                     activeTrades = activeTrades,
+                    pendingTrades = pendingTrades,
                     assets = cryptoAssets,
                     techMap = technicalAnalysisMap,
                     onOpenAddExistingDialog = {
                         showAddExistingHoldingDialog = true
+                    },
+                    onRequestConfirmFill = { trade ->
+                        tradeToConfirmFill = trade
+                    },
+                    onCancelAmbush = { tradeId ->
+                        coroutineScope.launch {
+                            val cancelled = AiAdvisorEngine.cancelPendingAmbush(dao, tradeId, "Kullanıcı tarafından iptal edildi")
+                            if (cancelled != null) {
+                                Toast.makeText(context, "❌ ${cancelled.symbol} Pusu Emri İptal Edildi. Rezerve bakiye kasaya iade edildi.", Toast.LENGTH_SHORT).show()
+                            }
+                        }
+                    },
+                    onExtendTimeout = { tradeId ->
+                        coroutineScope.launch {
+                            AiAdvisorEngine.extendAmbushTimeout(dao, tradeId, 30)
+                            Toast.makeText(context, "⏱️ Pusu Süresi +30 Dk Uzatıldı", Toast.LENGTH_SHORT).show()
+                        }
                     },
                     onUpdateCash = { newCash ->
                         coroutineScope.launch {
@@ -477,6 +524,11 @@ fun CryptoAnalystMasterApp() {
                 val tier3Amount = totalAllocatedPool / 3.0
                 val targetExit = entryPrice * (1.0 + (2.0 + 0.40) / 100.0)
 
+                val (recommendedTimeout, reasonText) = remember(asset, tech) {
+                    AiAdvisorEngine.calculateOptimalAmbushTimeout(asset, tech)
+                }
+                var selectedTimeoutMinutes by remember(asset) { mutableIntStateOf(recommendedTimeout) }
+
                 AlertDialog(
                     onDismissRequest = { showBudgetDialogForAsset = null },
                     containerColor = ObsidianCard,
@@ -485,7 +537,7 @@ fun CryptoAnalystMasterApp() {
                         Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                             Icon(Icons.Default.Security, contentDescription = null, tint = EmeraldProfit)
                             Text(
-                                text = "${asset.symbol} Bütçe & Kademe Planı",
+                                text = "${asset.symbol} Bütçe & Pusu Planı",
                                 color = TextPrimary,
                                 fontSize = 16.sp,
                                 fontWeight = FontWeight.Bold
@@ -526,6 +578,81 @@ fun CryptoAnalystMasterApp() {
                                 }
                             }
 
+                            // Professional Quant Ambush TTL (Time To Live) Selection
+                            Surface(
+                                color = ObsidianCardElevated,
+                                shape = RoundedCornerShape(10.dp),
+                                border = BorderStroke(1.dp, ObsidianBorder)
+                            ) {
+                                Column(modifier = Modifier.padding(10.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                                    Row(
+                                        modifier = Modifier.fillMaxWidth(),
+                                        horizontalArrangement = Arrangement.SpaceBetween,
+                                        verticalAlignment = Alignment.CenterVertically
+                                    ) {
+                                        Text("⏱️ Uzman Pusu Süresi (TTL):", color = TextPrimary, fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                                        Surface(
+                                            color = GoldContainer,
+                                            shape = RoundedCornerShape(4.dp)
+                                        ) {
+                                            Text(
+                                                text = "🤖 AI Önerisi: ${recommendedTimeout} Dk",
+                                                color = GoldWarm,
+                                                fontSize = 9.5.sp,
+                                                fontWeight = FontWeight.Bold,
+                                                modifier = Modifier.padding(horizontal = 5.dp, vertical = 2.dp)
+                                            )
+                                        }
+                                    }
+
+                                    Row(
+                                        modifier = Modifier.fillMaxWidth(),
+                                        horizontalArrangement = Arrangement.spacedBy(6.dp)
+                                    ) {
+                                        val timeOptions = listOf(
+                                            Triple(30, "30 Dk", "6 Mum"),
+                                            Triple(45, "45 Dk", "9 Mum"),
+                                            Triple(60, "60 Dk", "12 Mum")
+                                        )
+                                        timeOptions.forEach { (mins, label, candleCount) ->
+                                            val isSelected = selectedTimeoutMinutes == mins
+                                            Surface(
+                                                modifier = Modifier
+                                                    .weight(1f)
+                                                    .clickable { selectedTimeoutMinutes = mins },
+                                                color = if (isSelected) EmeraldProfit.copy(alpha = 0.2f) else ObsidianBg,
+                                                shape = RoundedCornerShape(8.dp),
+                                                border = BorderStroke(1.dp, if (isSelected) EmeraldProfitBright else ObsidianBorder)
+                                            ) {
+                                                Column(
+                                                    modifier = Modifier.padding(vertical = 6.dp, horizontal = 4.dp),
+                                                    horizontalAlignment = Alignment.CenterHorizontally
+                                                ) {
+                                                    Text(
+                                                        text = label,
+                                                        color = if (isSelected) EmeraldProfitBright else TextSecondary,
+                                                        fontSize = 11.sp,
+                                                        fontWeight = FontWeight.Bold
+                                                    )
+                                                    Text(
+                                                        text = candleCount,
+                                                        color = TextTertiary,
+                                                        fontSize = 9.sp
+                                                    )
+                                                }
+                                            }
+                                        }
+                                    }
+
+                                    Text(
+                                        text = reasonText,
+                                        color = TextTertiary,
+                                        fontSize = 10.sp,
+                                        lineHeight = 13.sp
+                                    )
+                                }
+                            }
+
                             Text(
                                 text = "🎯 Hedef Çıkış: $${String.format(Locale.US, "%.2f", targetExit)} (Net +%2.0 kâr + %0.40 Midas komisyonu karşılanır)",
                                 color = EmeraldProfit,
@@ -549,24 +676,56 @@ fun CryptoAnalystMasterApp() {
                                         dcaLevel = 1,
                                         maxDcaLevels = 3,
                                         nextDcaAmountUsdt = tier2Amount,
-                                        status = "ACTIVE_OPEN"
+                                        status = "PENDING_BUY",
+                                        openedAt = System.currentTimeMillis(),
+                                        ambushTimeoutMinutes = selectedTimeoutMinutes,
+                                        aiNote = "Midas pusu limit emri açıldı. $selectedTimeoutMinutes dk sayaç izleniyor ($reasonText)."
                                     )
                                     dao.insertTrade(newTrade)
                                     val currProfile = dao.getCapitalProfileOnce() ?: CapitalProfileEntity()
                                     dao.saveCapitalProfile(currProfile.copy(availableCashUsdt = (currProfile.availableCashUsdt - tier1Amount).coerceAtLeast(0.0)))
-                                    Toast.makeText(context, "✅ 1. Kademe Başlatıldı ($${String.format(Locale.US, "%.2f", tier1Amount)} USDT)", Toast.LENGTH_SHORT).show()
+                                    Toast.makeText(context, "🎯 ${asset.symbol} Pusu Emri Başlatıldı! ($selectedTimeoutMinutes Dk Zaman Aşımı Sayacı)", Toast.LENGTH_LONG).show()
                                     showBudgetDialogForAsset = null
                                 }
                             },
                             colors = ButtonDefaults.buttonColors(containerColor = EmeraldProfit, contentColor = Color.Black),
                             shape = RoundedCornerShape(8.dp)
                         ) {
-                            Text("Bütçeyi Onayla & Başlat", fontWeight = FontWeight.Bold, fontSize = 12.sp)
+                            Text("🎯 Pusuyu Başlat (${selectedTimeoutMinutes} Dk)", fontWeight = FontWeight.Bold, fontSize = 12.sp)
                         }
                     },
                     dismissButton = {
                         TextButton(onClick = { showBudgetDialogForAsset = null }) {
                             Text("Vazgeç", color = TextSecondary)
+                        }
+                    }
+                )
+            }
+
+            // 2.5 DIALOG: CONFIRM FILL OF PENDING AMBUSH BUY (Converts PENDING_BUY -> ACTIVE_OPEN)
+            tradeToConfirmFill?.let { trade ->
+                val asset = cryptoAssets.firstOrNull { it.symbol == trade.symbol }
+                val currentPrice = if (asset != null && asset.rawPrice > 0) asset.rawPrice else trade.entryPrice
+                ConfirmFillDialog(
+                    trade = trade,
+                    currentMarketPrice = currentPrice,
+                    onDismiss = { tradeToConfirmFill = null },
+                    onConfirm = { actualPrice, actualAmount ->
+                        coroutineScope.launch {
+                            val updated = AiAdvisorEngine.confirmPendingBuyFilled(
+                                dao = dao,
+                                tradeId = trade.id,
+                                actualEntryPrice = actualPrice,
+                                actualCoinAmount = actualAmount
+                            )
+                            if (updated != null) {
+                                Toast.makeText(
+                                    context,
+                                    "🎉 ${trade.symbol} Alışı Onaylandı! Midas'ta $${String.format(Locale.US, if (updated.targetExitPrice < 1.0) "%.4f" else "%.2f", updated.targetExitPrice)} Limit Satış Emri Girin.",
+                                    Toast.LENGTH_LONG
+                                ).show()
+                            }
+                            tradeToConfirmFill = null
                         }
                     }
                 )
@@ -946,6 +1105,117 @@ fun AddExistingHoldingDialog(
         dismissButton = {
             TextButton(onClick = onDismiss) {
                 Text("İptal", color = TextSecondary)
+            }
+        }
+    )
+}
+
+/**
+ * Interactive dialog to confirm when a pending ambush buy order is filled on Midas.
+ * Allows user to verify or tweak actual filled price & filled amount.
+ */
+@Composable
+fun ConfirmFillDialog(
+    trade: AppTradeEntity,
+    currentMarketPrice: Double,
+    onDismiss: () -> Unit,
+    onConfirm: (actualPrice: Double, actualAmount: Double) -> Unit
+) {
+    var priceInput by remember {
+        mutableStateOf(String.format(Locale.US, if (trade.entryPrice < 1.0) "%.4f" else "%.2f", trade.entryPrice))
+    }
+    var amountInput by remember {
+        mutableStateOf(String.format(Locale.US, "%.6f", trade.coinAmount).trimEnd('0').trimEnd('.'))
+    }
+
+    val parsedPrice = parseFlexibleDouble(priceInput) ?: trade.entryPrice
+    val parsedAmount = parseFlexibleDouble(amountInput) ?: trade.coinAmount
+    val targetExit = parsedPrice * (1.0 + (2.0 + 0.40) / 100.0)
+    val expectedNetPnl = (parsedPrice * parsedAmount) * 0.020
+
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        containerColor = ObsidianCard,
+        shape = RoundedCornerShape(16.dp),
+        title = {
+            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                Icon(Icons.Default.CheckCircle, contentDescription = null, tint = EmeraldProfitBright)
+                Text("Midas Alışını Onayla & Satışa Başla", color = TextPrimary, fontSize = 15.sp, fontWeight = FontWeight.Bold)
+            }
+        },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                Text(
+                    text = "Midas'ta '${trade.symbol}' için bekleyen limit alış emriniz gerçekleşti mi? Midas'taki gerçekleşen alış fiyatı ve adetini onaylayın:",
+                    color = TextSecondary,
+                    fontSize = 11.5.sp
+                )
+
+                OutlinedTextField(
+                    value = priceInput,
+                    onValueChange = { priceInput = it },
+                    label = { Text("Gerçekleşen Alış Fiyatı (USDT)", fontSize = 11.sp) },
+                    modifier = Modifier.fillMaxWidth(),
+                    singleLine = true,
+                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                    colors = OutlinedTextFieldDefaults.colors(
+                        focusedBorderColor = EmeraldProfit,
+                        unfocusedBorderColor = ObsidianBorder,
+                        focusedTextColor = Color.White,
+                        unfocusedTextColor = Color.White
+                    )
+                )
+
+                OutlinedTextField(
+                    value = amountInput,
+                    onValueChange = { amountInput = it },
+                    label = { Text("Alınan Varlık Adeti (${trade.symbol})", fontSize = 11.sp) },
+                    modifier = Modifier.fillMaxWidth(),
+                    singleLine = true,
+                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                    colors = OutlinedTextFieldDefaults.colors(
+                        focusedBorderColor = EmeraldProfit,
+                        unfocusedBorderColor = ObsidianBorder,
+                        focusedTextColor = Color.White,
+                        unfocusedTextColor = Color.White
+                    )
+                )
+
+                Surface(
+                    color = ObsidianBg,
+                    shape = RoundedCornerShape(10.dp),
+                    border = BorderStroke(1.dp, ObsidianBorder)
+                ) {
+                    Column(modifier = Modifier.padding(10.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                        Text("🎯 Onay Sonrası Hedef Limit Satış Emri:", color = EmeraldProfitBright, fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                        Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                            Text("Satış Hedefi (+%2.0 Net):", color = TextSecondary, fontSize = 10.5.sp)
+                            Text("$${String.format(Locale.US, if (targetExit < 1.0) "%.4f" else "%.2f", targetExit)} USDT", color = EmeraldProfitBright, fontSize = 11.sp, fontWeight = FontWeight.Bold, fontFamily = FontFamily.Monospace)
+                        }
+                        Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                            Text("Beklenen Net Kâr:", color = TextSecondary, fontSize = 10.5.sp)
+                            Text("+$${String.format(Locale.US, "%.2f", expectedNetPnl)} USDT", color = EmeraldProfit, fontSize = 11.sp, fontWeight = FontWeight.Bold, fontFamily = FontFamily.Monospace)
+                        }
+                    }
+                }
+            }
+        },
+        confirmButton = {
+            Button(
+                onClick = {
+                    val p = parseFlexibleDouble(priceInput) ?: trade.entryPrice
+                    val a = parseFlexibleDouble(amountInput) ?: trade.coinAmount
+                    onConfirm(p, a)
+                },
+                colors = ButtonDefaults.buttonColors(containerColor = EmeraldProfit, contentColor = Color.Black),
+                shape = RoundedCornerShape(8.dp)
+            ) {
+                Text("✅ Onayla & Satışı Takip Et", fontWeight = FontWeight.Bold, fontSize = 12.sp)
+            }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss) {
+                Text("Vazgeç", color = TextSecondary)
             }
         }
     )
@@ -1571,11 +1841,247 @@ fun QuickCashUpdateDialog(
     )
 }
 
+/**
+ * Interactive card displaying a pending ambush buy order on Midas with a live 45-minute countdown timer,
+ * price comparison vs current market price, and 1-tap confirmation or cancellation.
+ */
+@Composable
+fun PendingAmbushCard(
+    trade: AppTradeEntity,
+    currentPrice: Double,
+    onRequestConfirmFill: (AppTradeEntity) -> Unit,
+    onCancelAmbush: (tradeId: Long) -> Unit,
+    onExtendTimeout: (tradeId: Long) -> Unit
+) {
+    var currentTime by remember { mutableLongStateOf(System.currentTimeMillis()) }
+    LaunchedEffect(Unit) {
+        while (true) {
+            delay(1000)
+            currentTime = System.currentTimeMillis()
+        }
+    }
+
+    val totalDurationMillis = (trade.ambushTimeoutMinutes.coerceAtLeast(1)) * 60 * 1000L
+    val elapsedMillis = (currentTime - trade.openedAt).coerceAtLeast(0L)
+    val remainingMillis = (totalDurationMillis - elapsedMillis).coerceAtLeast(0L)
+    val remainingSeconds = (remainingMillis / 1000) % 60
+    val remainingMinutes = (remainingMillis / (1000 * 60))
+    val isExpired = remainingMillis <= 0L
+    val progress = if (totalDurationMillis > 0) (elapsedMillis.toFloat() / totalDurationMillis.toFloat()).coerceIn(0f, 1f) else 1f
+
+    val isPriceReached = currentPrice > 0 && currentPrice <= trade.entryPrice
+    val diffPercent = if (trade.entryPrice > 0 && currentPrice > 0) ((currentPrice - trade.entryPrice) / trade.entryPrice) * 100.0 else 0.0
+
+    val cardBorderColor = when {
+        isPriceReached -> EmeraldProfitBright
+        isExpired -> CoralRedBright
+        else -> GoldWarm
+    }
+
+    Surface(
+        modifier = Modifier.fillMaxWidth(),
+        color = ObsidianSurface,
+        shape = RoundedCornerShape(14.dp),
+        border = BorderStroke(1.2.dp, cardBorderColor)
+    ) {
+        Column(modifier = Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+            // Header
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                    Text(
+                        text = "${trade.symbol}/USDT",
+                        color = TextPrimary,
+                        fontSize = 15.sp,
+                        fontWeight = FontWeight.ExtraBold,
+                        fontFamily = FontFamily.Monospace
+                    )
+                    Surface(
+                        color = if (isPriceReached) EmeraldContainer else if (isExpired) CoralRed.copy(alpha = 0.2f) else GoldContainer,
+                        shape = RoundedCornerShape(6.dp)
+                    ) {
+                        Text(
+                            text = if (isPriceReached) "⚡ ALIŞ FİYATINA İNDİ!" else if (isExpired) "⏱️ ${trade.ambushTimeoutMinutes} DK SÜRE DOLDU" else "⏳ MİDAS PUSUSU",
+                            color = if (isPriceReached) EmeraldProfitBright else if (isExpired) CoralRedBright else GoldWarm,
+                            fontSize = 9.5.sp,
+                            fontWeight = FontWeight.Bold,
+                            modifier = Modifier.padding(horizontal = 6.dp, vertical = 3.dp)
+                        )
+                    }
+                }
+
+                // Countdown Badge
+                Surface(
+                    color = if (isExpired) CoralRed.copy(alpha = 0.25f) else ObsidianCardElevated,
+                    shape = RoundedCornerShape(6.dp),
+                    border = BorderStroke(0.8.dp, if (isExpired) CoralRed else GoldWarm.copy(alpha = 0.6f))
+                ) {
+                    Row(
+                        modifier = Modifier.padding(horizontal = 7.dp, vertical = 3.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(4.dp)
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.Timer,
+                            contentDescription = null,
+                            tint = if (isExpired) CoralRedBright else GoldWarm,
+                            modifier = Modifier.size(12.dp)
+                        )
+                        Text(
+                            text = if (isExpired) "00:00 (Doldu)" else String.format(Locale.US, "%02d:%02d / %02d:00", remainingMinutes, remainingSeconds, trade.ambushTimeoutMinutes),
+                            color = if (isExpired) CoralRedBright else GoldWarm,
+                            fontSize = 10.5.sp,
+                            fontWeight = FontWeight.ExtraBold,
+                            fontFamily = FontFamily.Monospace
+                        )
+                    }
+                }
+            }
+
+            // Progress Bar
+            LinearProgressIndicator(
+                progress = { 1f - progress },
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(4.dp)
+                    .clip(RoundedCornerShape(2.dp)),
+                color = if (isExpired) CoralRedBright else if (isPriceReached) EmeraldProfitBright else GoldWarm,
+                trackColor = ObsidianBorder
+            )
+
+            // Price Details Matrix
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween
+            ) {
+                Column {
+                    Text("Pusu Limit Alış:", color = TextTertiary, fontSize = 10.sp)
+                    Text("$${String.format(Locale.US, if (trade.entryPrice < 1.0) "%.4f" else "%.2f", trade.entryPrice)}", color = IceCyanBright, fontSize = 12.sp, fontWeight = FontWeight.Bold, fontFamily = FontFamily.Monospace)
+                }
+                Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                    Text("Rezerve Kasa:", color = TextTertiary, fontSize = 10.sp)
+                    Text("$${String.format(Locale.US, "%.2f", trade.investedUsdt)} USDT", color = TextPrimary, fontSize = 12.sp, fontWeight = FontWeight.Bold, fontFamily = FontFamily.Monospace)
+                }
+                Column(horizontalAlignment = Alignment.End) {
+                    Text("Anlık Piyasa:", color = TextTertiary, fontSize = 10.sp)
+                    Text(
+                        text = "$${String.format(Locale.US, if (currentPrice < 1.0) "%.4f" else "%.2f", currentPrice)} (${if (diffPercent >= 0) "+" else ""}${String.format(Locale.US, "%.2f", diffPercent)}%)",
+                        color = if (isPriceReached) EmeraldProfitBright else TextSecondary,
+                        fontSize = 11.5.sp,
+                        fontWeight = FontWeight.Bold,
+                        fontFamily = FontFamily.Monospace
+                    )
+                }
+            }
+
+            // Alert Box if Price Reached or Timeout
+            if (isPriceReached) {
+                Surface(
+                    color = EmeraldProfit.copy(alpha = 0.12f),
+                    shape = RoundedCornerShape(8.dp),
+                    border = BorderStroke(1.dp, EmeraldProfitBright)
+                ) {
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(8.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(6.dp)
+                    ) {
+                        Icon(Icons.Default.Bolt, contentDescription = null, tint = EmeraldProfitBright, modifier = Modifier.size(16.dp))
+                        Text(
+                            text = "⚡ Fiyat pusu seviyesine indi ($${String.format(Locale.US, if (currentPrice < 1.0) "%.4f" else "%.2f", currentPrice)}). Midas'ta emriniz dolduysa alışı onaylayın!",
+                            color = EmeraldProfitBright,
+                            fontSize = 11.sp,
+                            fontWeight = FontWeight.Bold
+                        )
+                    }
+                }
+            } else if (isExpired) {
+                Surface(
+                    color = CoralRed.copy(alpha = 0.12f),
+                    shape = RoundedCornerShape(8.dp),
+                    border = BorderStroke(1.dp, CoralRed.copy(alpha = 0.6f))
+                ) {
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(8.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(6.dp)
+                    ) {
+                        Icon(Icons.Default.WarningAmber, contentDescription = null, tint = CoralRedBright, modifier = Modifier.size(16.dp))
+                        Text(
+                            text = "⏱️ ${trade.ambushTimeoutMinutes} Dk pusu süresi doldu. Fiyat desteğe inmediyse Midas'tan emri iptal edip yeni fırsat arayın.",
+                            color = CoralRedBright,
+                            fontSize = 11.sp,
+                            fontWeight = FontWeight.Bold
+                        )
+                    }
+                }
+            }
+
+            // Action Buttons
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(6.dp)
+            ) {
+                Button(
+                    onClick = { onRequestConfirmFill(trade) },
+                    modifier = Modifier
+                        .weight(1.3f)
+                        .height(38.dp),
+                    shape = RoundedCornerShape(8.dp),
+                    colors = ButtonDefaults.buttonColors(
+                        containerColor = if (isPriceReached) EmeraldProfit else ObsidianCardElevated,
+                        contentColor = if (isPriceReached) Color.Black else TextPrimary
+                    ),
+                    border = BorderStroke(1.dp, if (isPriceReached) EmeraldProfit else EmeraldProfit.copy(alpha = 0.5f))
+                ) {
+                    Icon(Icons.Default.Check, contentDescription = null, modifier = Modifier.size(14.dp), tint = if (isPriceReached) Color.Black else EmeraldProfitBright)
+                    Spacer(modifier = Modifier.width(4.dp))
+                    Text("✅ Midas'ta Alındı", fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                }
+
+                OutlinedButton(
+                    onClick = { onCancelAmbush(trade.id) },
+                    modifier = Modifier
+                        .weight(1.1f)
+                        .height(38.dp),
+                    shape = RoundedCornerShape(8.dp),
+                    colors = ButtonDefaults.outlinedButtonColors(contentColor = CoralRedBright),
+                    border = BorderStroke(1.dp, CoralRed.copy(alpha = 0.5f))
+                ) {
+                    Icon(Icons.Default.Close, contentDescription = null, modifier = Modifier.size(14.dp))
+                    Spacer(modifier = Modifier.width(3.dp))
+                    Text("❌ İptal Et", fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                }
+
+                if (!isExpired) {
+                    IconButton(
+                        onClick = { onExtendTimeout(trade.id) },
+                        modifier = Modifier
+                            .size(38.dp)
+                            .background(ObsidianCardElevated, RoundedCornerShape(8.dp))
+                            .border(width = 0.8.dp, color = ObsidianBorder, shape = RoundedCornerShape(8.dp))
+                    ) {
+                        Icon(Icons.Default.MoreTime, contentDescription = "+30 Dk", tint = GoldWarm, modifier = Modifier.size(16.dp))
+                    }
+                }
+            }
+        }
+    }
+}
+
 @Composable
 fun LiveAssistantScreen(
     guidance: ActionGuidance,
     capitalProfile: CapitalProfileEntity?,
     activeTrades: List<AppTradeEntity>,
+    pendingTrades: List<AppTradeEntity> = emptyList(),
     assets: List<CryptoAsset>,
     oracleMap: Map<String, BinanceOracleData>,
     techMap: Map<String, TechnicalAnalysis5m>,
@@ -1585,6 +2091,9 @@ fun LiveAssistantScreen(
     onManualRefresh: () -> Unit = {},
     onOpenBudgetProposal: (CryptoAsset) -> Unit,
     onOpenAddExistingDialog: () -> Unit,
+    onRequestConfirmFill: (trade: AppTradeEntity) -> Unit = {},
+    onCancelAmbush: (tradeId: Long) -> Unit = {},
+    onExtendTimeout: (tradeId: Long) -> Unit = {},
     onRequestConfirmSale: (trade: AppTradeEntity, currentPrice: Double) -> Unit,
     onRequestUpdateTarget: (trade: AppTradeEntity, currentPrice: Double) -> Unit,
     onDcaStep: (tradeId: Long, dcaPrice: Double, dcaAmount: Double) -> Unit
@@ -1839,6 +2348,37 @@ fun LiveAssistantScreen(
 
                     Icon(Icons.Default.ChevronRight, contentDescription = null, tint = IceCyanBright)
                 }
+            }
+        }
+
+        // 1.5 PENDING AMBUSH ORDERS (WAITING FOR MIDAS BUY FILL WITH 45 MIN TIMEOUT)
+        if (pendingTrades.isNotEmpty()) {
+            item {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Text(
+                        text = "⏳ BEKLEYEN MİDAS PUSU EMİRLERİ (${pendingTrades.size})",
+                        color = GoldWarm,
+                        fontSize = 12.5.sp,
+                        fontWeight = FontWeight.ExtraBold,
+                        fontFamily = FontFamily.Monospace
+                    )
+                }
+            }
+
+            items(pendingTrades, key = { "pending_${it.id}" }) { trade ->
+                val asset = assets.firstOrNull { it.symbol == trade.symbol }
+                val currentPrice = if (asset != null && asset.rawPrice > 0) asset.rawPrice else trade.entryPrice
+                PendingAmbushCard(
+                    trade = trade,
+                    currentPrice = currentPrice,
+                    onRequestConfirmFill = onRequestConfirmFill,
+                    onCancelAmbush = onCancelAmbush,
+                    onExtendTimeout = onExtendTimeout
+                )
             }
         }
 
@@ -2415,9 +2955,13 @@ fun LiveAssistantScreen(
 fun CapitalAndPortfolioScreen(
     capitalProfile: CapitalProfileEntity?,
     activeTrades: List<AppTradeEntity>,
+    pendingTrades: List<AppTradeEntity> = emptyList(),
     assets: List<CryptoAsset>,
     techMap: Map<String, TechnicalAnalysis5m>,
     onOpenAddExistingDialog: () -> Unit,
+    onRequestConfirmFill: (trade: AppTradeEntity) -> Unit = {},
+    onCancelAmbush: (tradeId: Long) -> Unit = {},
+    onExtendTimeout: (tradeId: Long) -> Unit = {},
     onUpdateCash: (Double) -> Unit,
     onUpdateMinThreshold: (Double) -> Unit,
     onRequestConfirmSale: (trade: AppTradeEntity, currentPrice: Double) -> Unit,
@@ -2433,6 +2977,7 @@ fun CapitalAndPortfolioScreen(
     val currentCash = capitalProfile?.availableCashUsdt ?: 0.0
     val minThreshold = capitalProfile?.minSafeThresholdUsdt ?: 0.0
     val withdrawn = capitalProfile?.totalWithdrawnUsdt ?: 0.0
+    val reservedInAmbushUsdt = pendingTrades.sumOf { it.investedUsdt }
 
     LazyColumn(
         modifier = Modifier
@@ -2530,7 +3075,7 @@ fun CapitalAndPortfolioScreen(
                         }
                     }
 
-                    // Stat Metrics: Withdrawn to USD, Safe Threshold
+                    // Stat Metrics: Withdrawn to USD, Safe Threshold, Reserved Ambush
                     Row(
                         modifier = Modifier.fillMaxWidth(),
                         horizontalArrangement = Arrangement.spacedBy(8.dp)
@@ -2542,10 +3087,10 @@ fun CapitalAndPortfolioScreen(
                             border = BorderStroke(1.dp, ObsidianBorder)
                         ) {
                             Column(modifier = Modifier.padding(10.dp)) {
-                                Text("Çekilen Nakit (USD):", color = TextTertiary, fontSize = 10.sp)
+                                Text("Pusuda Rezerve:", color = TextTertiary, fontSize = 10.sp)
                                 Text(
-                                    text = "$${String.format(Locale.US, "%.2f", withdrawn)} USDT",
-                                    color = IceCyanBright,
+                                    text = "$${String.format(Locale.US, "%.2f", reservedInAmbushUsdt)} USDT",
+                                    color = if (reservedInAmbushUsdt > 0) GoldWarm else TextSecondary,
                                     fontSize = 14.sp,
                                     fontWeight = FontWeight.ExtraBold,
                                     fontFamily = FontFamily.Monospace
@@ -2588,6 +3133,31 @@ fun CapitalAndPortfolioScreen(
                 Icon(Icons.Default.AddBusiness, contentDescription = null, modifier = Modifier.size(18.dp))
                 Spacer(modifier = Modifier.width(6.dp))
                 Text("+ Mevcut Midas Varlığımı Ekle (Sat / Bekle Takibi)", fontSize = 12.sp, fontWeight = FontWeight.ExtraBold)
+            }
+        }
+
+        // PENDING AMBUSH SECTION IN PORTFOLIO SCREEN
+        if (pendingTrades.isNotEmpty()) {
+            item {
+                Text(
+                    text = "⏳ MİDAS'TA BEKLEYEN PUSU EMİRLERİ (${pendingTrades.size})",
+                    color = GoldWarm,
+                    fontSize = 13.sp,
+                    fontWeight = FontWeight.ExtraBold,
+                    fontFamily = FontFamily.Monospace
+                )
+            }
+
+            items(pendingTrades, key = { "port_pending_${it.id}" }) { trade ->
+                val asset = assets.firstOrNull { it.symbol == trade.symbol }
+                val currentPrice = if (asset != null && asset.rawPrice > 0) asset.rawPrice else trade.entryPrice
+                PendingAmbushCard(
+                    trade = trade,
+                    currentPrice = currentPrice,
+                    onRequestConfirmFill = onRequestConfirmFill,
+                    onCancelAmbush = onCancelAmbush,
+                    onExtendTimeout = onExtendTimeout
+                )
             }
         }
 

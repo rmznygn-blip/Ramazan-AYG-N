@@ -24,8 +24,9 @@ data class AppTradeEntity(
     val maxDcaLevels: Int = 3,
     val nextDcaPrice: Double = 0.0,
     val nextDcaAmountUsdt: Double = 0.0,
-    val status: String = "ACTIVE_OPEN", // "ACTIVE_OPEN", "COMPLETED_PROFIT", "COMPLETED_LOSS", "CANCELLED"
+    val status: String = "ACTIVE_OPEN", // "ACTIVE_OPEN", "PENDING_BUY", "COMPLETED_PROFIT", "COMPLETED_LOSS", "CANCELLED"
     val openedAt: Long = System.currentTimeMillis(),
+    val ambushTimeoutMinutes: Int = 45,
     val closedAt: Long? = null,
     val aiNote: String = ""
 )
@@ -98,10 +99,13 @@ interface AppDatabaseDao {
     @Query("SELECT * FROM app_trades WHERE status = 'ACTIVE_OPEN' ORDER BY openedAt DESC")
     fun getActiveTradesFlow(): Flow<List<AppTradeEntity>>
 
-    @Query("SELECT * FROM app_trades WHERE status != 'ACTIVE_OPEN' ORDER BY closedAt DESC")
+    @Query("SELECT * FROM app_trades WHERE status = 'PENDING_BUY' ORDER BY openedAt DESC")
+    fun getPendingTradesFlow(): Flow<List<AppTradeEntity>>
+
+    @Query("SELECT * FROM app_trades WHERE status NOT IN ('ACTIVE_OPEN', 'PENDING_BUY') ORDER BY closedAt DESC")
     fun getHistoricalTradesFlow(): Flow<List<AppTradeEntity>>
 
-    @Query("SELECT * FROM app_trades WHERE status != 'ACTIVE_OPEN' ORDER BY closedAt DESC")
+    @Query("SELECT * FROM app_trades WHERE status NOT IN ('ACTIVE_OPEN', 'PENDING_BUY') ORDER BY closedAt DESC")
     suspend fun getHistoricalTradesOnce(): List<AppTradeEntity>
 
     @Query("SELECT * FROM app_trades WHERE id = :id LIMIT 1")

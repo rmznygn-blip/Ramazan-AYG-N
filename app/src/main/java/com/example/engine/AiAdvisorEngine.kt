@@ -31,12 +31,13 @@ data class ActionGuidance(
 object AiAdvisorEngine {
 
     /**
-     * Synthesizes Portfolio Capital, Active Trades, Live 5m Technical Indicators,
+     * Synthesizes Portfolio Capital, Active Trades, Pending Ambush Orders, Live 5m Technical Indicators,
      * Binance WebSocket Order Book Depth, Z-Score, ATR, and Trailing TP.
      */
     fun computeRealtimeGuidance(
         capitalProfile: CapitalProfileEntity?,
         activeTrades: List<AppTradeEntity>,
+        pendingTrades: List<AppTradeEntity> = emptyList(),
         assets: List<CryptoAsset>,
         oracleMap: Map<String, BinanceOracleData>,
         techMap: Map<String, TechnicalAnalysis5m>
@@ -59,7 +60,7 @@ object AiAdvisorEngine {
         }
 
         // 1. Case: Kasa Güvenli Eşiğin Altındaysa
-        if (minThreshold > 0.0 && cash < minThreshold && activeTrades.isEmpty()) {
+        if (minThreshold > 0.0 && cash < minThreshold && activeTrades.isEmpty() && pendingTrades.isEmpty()) {
             return ActionGuidance(
                 title = "🛡️ KASA GÜVENLİK EŞİĞİ KORUMASI",
                 statusBadge = "KASA YETERSİZ ($${String.format(Locale.US, "%.1f", cash)} / $${String.format(Locale.US, "%.1f", minThreshold)} USDT)",
@@ -158,6 +159,59 @@ object AiAdvisorEngine {
                     targetSymbol = trade.symbol,
                     recommendedExitPrice = trade.targetExitPrice,
                     reasoning = "Sıfır zarar stratejisi: Spot varlıkta panik satışı yapılmaz, kârlı limit emrin dolması beklenir."
+                )
+            }
+        }
+
+        // 2.5 Case: Midas'ta Bekleyen Pusu / Alış Emri Varsa
+        if (pendingTrades.isNotEmpty()) {
+            val pending = pendingTrades.first()
+            val asset = assets.firstOrNull { it.symbol == pending.symbol }
+            val currentPrice = if (asset != null && asset.rawPrice > 0) asset.rawPrice else pending.entryPrice
+            val elapsedMinutes = (System.currentTimeMillis() - pending.openedAt) / (1000 * 60)
+            val remainingMinutes = (pending.ambushTimeoutMinutes - elapsedMinutes).coerceAtLeast(0)
+            val isPriceAtOrBelowEntry = currentPrice <= pending.entryPrice
+            val diffPercent = if (pending.entryPrice > 0) ((currentPrice - pending.entryPrice) / pending.entryPrice) * 100.0 else 0.0
+
+            if (isPriceAtOrBelowEntry) {
+                return ActionGuidance(
+                    title = "⚡ FİYAT PUSU EŞİĞİNE GELDİ: ${pending.symbol}",
+                    statusBadge = "MİDAS'TA ALIM GERÇEKLEŞTİ Mİ?",
+                    statusColorHex = 0xFF00FF9D,
+                    step1 = "1. Anlık fiyat ($${String.format(Locale.US, if (currentPrice < 1.0) "%.4f" else "%.2f", currentPrice)}) pusu limitinize ($${String.format(Locale.US, if (pending.entryPrice < 1.0) "%.4f" else "%.2f", pending.entryPrice)}) ulaştı veya altına indi!",
+                    step2 = "2. Midas hesabınızı kontrol edin: Limit alış emriniz dolduysa 'Alındı (Pozisyona Dönüştür)' butonuna basın.",
+                    step3 = "3. Alım teyit edildikten sonra anında +%2.0 Net kârlı limit satış emri aktif edilecektir.",
+                    targetSymbol = pending.symbol,
+                    recommendedEntryPrice = pending.entryPrice,
+                    recommendedExitPrice = pending.targetExitPrice,
+                    netProfitUsdtExpected = pending.investedUsdt * 0.020,
+                    reasoning = "5 dakikalık dip desteği test edildi. Emir dolduysa pozisyonu aktifleştirin."
+                )
+            } else if (remainingMinutes <= 0) {
+                return ActionGuidance(
+                    title = "⏱️ ${pending.ambushTimeoutMinutes} DK PUSU SÜRESİ DOLDU: ${pending.symbol}",
+                    statusBadge = "EMİR İPTAL & YENİ ANALİZ ÖNERİLİR",
+                    statusColorHex = 0xFFFFB800,
+                    step1 = "1. ${pending.symbol} için verilen ${pending.ambushTimeoutMinutes} dakikalık pusu süresi doldu ve fiyat destek limitine inmedi (Mesafe: +%${String.format(Locale.US, "%.2f", diffPercent)}).",
+                    step2 = "2. Midas'taki bekleyen limit alış emrinizi iptal edip uygulamadan 'İptal Et' butonuna basarak bütçenizi serbest bırakın.",
+                    step3 = "3. Sistem anında güncel verilerle yeni bir dip ve pusu fırsatı tespit edecektir.",
+                    targetSymbol = pending.symbol,
+                    recommendedEntryPrice = pending.entryPrice,
+                    reasoning = "Zaman disiplini: Desteğe inmeyen ve yukarı kaçan emirler iptal edilir, sermaye bayatlamadan taze fırsatlara yönlendirilir.",
+                    isTimeoutWarning = true
+                )
+            } else {
+                return ActionGuidance(
+                    title = "⏳ MİDAS'TA PUSU BEKLENİYOR: ${pending.symbol}",
+                    statusBadge = "PUSU AKTİF (${remainingMinutes} DK KALDI)",
+                    statusColorHex = 0xFF00F0FF,
+                    step1 = "1. Midas'ta $${String.format(Locale.US, if (pending.entryPrice < 1.0) "%.4f" else "%.2f", pending.entryPrice)} USDT limit alış emriniz açık olmalıdır (Bütçe: $${String.format(Locale.US, "%.2f", pending.investedUsdt)}).",
+                    step2 = "2. Anlık Fiyat: $${String.format(Locale.US, if (currentPrice < 1.0) "%.4f" else "%.2f", currentPrice)} USDT (Fiyat emrinizin %${String.format(Locale.US, "%.2f", diffPercent)} üzerinde seyrediyor).",
+                    step3 = "3. Fiyat desteğe indiğinde veya ${pending.ambushTimeoutMinutes} dk dolduğunda sistem sizi anında uyaracaktır.",
+                    targetSymbol = pending.symbol,
+                    recommendedEntryPrice = pending.entryPrice,
+                    recommendedExitPrice = pending.targetExitPrice,
+                    reasoning = "Sabırla dip desteğe dokunması bekleniyor. Emir dolmadan önce kârlı satış takibine geçilmez."
                 )
             }
         }
@@ -322,6 +376,63 @@ object AiAdvisorEngine {
         updatedTrade
     }
 
+    suspend fun confirmPendingBuyFilled(
+        dao: AppDatabaseDao,
+        tradeId: Long,
+        actualEntryPrice: Double? = null,
+        actualCoinAmount: Double? = null
+    ): AppTradeEntity? = withContext(Dispatchers.IO) {
+        val trade = dao.getTradeById(tradeId) ?: return@withContext null
+        val finalEntryPrice = actualEntryPrice ?: trade.entryPrice
+        val finalCoinAmount = actualCoinAmount ?: if (finalEntryPrice > 0) (trade.investedUsdt * 0.998) / finalEntryPrice else trade.coinAmount
+        val finalTargetExit = finalEntryPrice * (1.0 + (2.0 + 0.40) / 100.0)
+
+        val updatedTrade = trade.copy(
+            entryPrice = finalEntryPrice,
+            coinAmount = finalCoinAmount,
+            targetExitPrice = finalTargetExit,
+            status = "ACTIVE_OPEN",
+            openedAt = System.currentTimeMillis(),
+            aiNote = "Midas alış emri onaylandı. +%2.0 Net kâr hedefi izleniyor."
+        )
+        dao.updateTrade(updatedTrade)
+        updatedTrade
+    }
+
+    suspend fun cancelPendingAmbush(
+        dao: AppDatabaseDao,
+        tradeId: Long,
+        reason: String = "Kullanıcı veya 45 dk zaman aşımı iptali"
+    ): AppTradeEntity? = withContext(Dispatchers.IO) {
+        val trade = dao.getTradeById(tradeId) ?: return@withContext null
+        val updatedTrade = trade.copy(
+            status = "CANCELLED",
+            closedAt = System.currentTimeMillis(),
+            aiNote = reason
+        )
+        dao.updateTrade(updatedTrade)
+
+        // Restore reserved cash back into available cash
+        val currentProfile = dao.getCapitalProfileOnce() ?: CapitalProfileEntity()
+        val restoredCash = currentProfile.availableCashUsdt + trade.investedUsdt
+        dao.saveCapitalProfile(currentProfile.copy(availableCashUsdt = restoredCash.coerceAtLeast(0.0)))
+
+        updatedTrade
+    }
+
+    suspend fun extendAmbushTimeout(
+        dao: AppDatabaseDao,
+        tradeId: Long,
+        additionalMinutes: Int = 30
+    ): AppTradeEntity? = withContext(Dispatchers.IO) {
+        val trade = dao.getTradeById(tradeId) ?: return@withContext null
+        val updatedTrade = trade.copy(
+            ambushTimeoutMinutes = trade.ambushTimeoutMinutes + additionalMinutes
+        )
+        dao.updateTrade(updatedTrade)
+        updatedTrade
+    }
+
     suspend fun closeActiveTrade(
         dao: AppDatabaseDao,
         tradeId: Long,
@@ -462,5 +573,31 @@ object AiAdvisorEngine {
 
         dao.insertWeeklyReport(reportEntity)
         reportEntity
+    }
+
+    /**
+     * Calculates the optimal ambush time-to-live (TTL) in minutes based on professional quant
+     * candle count cycles on 5m charts and asset ATR/volatility.
+     *
+     * Rules:
+     * - High Volatility (ATR >= 1.3% or high beta like SOL/PEPE/DOGE/AVAX/NEAR): 30 Mins (6 Candles) - Fast Scalp TTL
+     * - Balanced Pullback (ATR 0.7% - 1.3% e.g. ETH/LINK/ADA): 45 Mins (9 Candles) - Standard Pullback TTL
+     * - Low Volatility / Heavy Base (ATR < 0.7% e.g. BTC): 60 Mins (12 Candles) - Patient Base Retest TTL
+     */
+    fun calculateOptimalAmbushTimeout(asset: CryptoAsset, tech: TechnicalAnalysis5m?): Pair<Int, String> {
+        val atrPct = if (asset.rawPrice > 0 && tech != null) (tech.atr14 / asset.rawPrice) * 100.0 else 1.0
+        val isHighBeta = asset.symbol in listOf("SOL", "PEPE", "DOGE", "SHIB", "NEAR", "SUI", "AVAX")
+
+        return when {
+            atrPct >= 1.3 || (isHighBeta && atrPct >= 1.0) -> {
+                Pair(30, "Yüksek Oynaklık (6 Mum / Hızlı Scalp TTL). Fiyat 30 dk içinde desteğe inmezse trend yukarı kaçmış veya yapı bozulmuştur.")
+            }
+            atrPct <= 0.7 || asset.symbol in listOf("BTC", "USDC") -> {
+                Pair(60, "Ağır Tahta / Taban Akümülasyonu (12 Mum / Sabırlı Taban). Desteğin test edilmesi daha uzun bir konsolidasyon gerektirir.")
+            }
+            else -> {
+                Pair(45, "Standart 5m Pullback (9 Mum / Dengeli). Klasik EMA20 / Destek retest döngüsü.")
+            }
+        }
     }
 }
