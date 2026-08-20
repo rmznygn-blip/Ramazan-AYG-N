@@ -33,6 +33,7 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.example.data.local.*
@@ -514,8 +515,14 @@ fun CryptoAnalystMasterApp() {
                 val tech = technicalAnalysisMap[asset.symbol]
                 val oracle = binanceOracleMap[asset.symbol]
                 val currentPrice = if (asset.rawPrice > 0) asset.rawPrice else (oracle?.binanceGlobalPrice ?: 0.0)
-                val entryPrice = if (tech != null && tech.supportLevel > 0) tech.supportLevel else currentPrice * 0.985
+                val defaultSupportPrice = if (tech != null && tech.supportLevel > 0) tech.supportLevel else currentPrice * 0.985
                 val availableCash = capitalProfile?.availableCashUsdt ?: 100.0
+
+                var entryPriceInput by remember(asset) {
+                    mutableStateOf(String.format(Locale.US, if (defaultSupportPrice < 1.0) "%.4f" else "%.2f", defaultSupportPrice))
+                }
+                val parsedCustomEntry = parseFlexibleDouble(entryPriceInput) ?: defaultSupportPrice
+                val entryPrice = if (parsedCustomEntry > 0) parsedCustomEntry else defaultSupportPrice
 
                 // Recommend 60% of cash as total allocated pool, max $60, min $30
                 val totalAllocatedPool = (availableCash * 0.60).coerceIn(30.0, 60.0).coerceAtMost(availableCash)
@@ -547,10 +554,106 @@ fun CryptoAnalystMasterApp() {
                     text = {
                         Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
                             Text(
-                                text = "Kasanızın tamamı riske atılmaz. Sadece onaylayacağınız bu havuz 3 kademeli olarak kullanılır:",
+                                text = "Midas limit alış fiyatınızı belirleyin veya Midas yuvarlamasına göre düzeltin:",
                                 color = TextSecondary,
-                                fontSize = 12.sp
+                                fontSize = 11.5.sp
                             )
+
+                            // Editable Entry Price Input
+                            OutlinedTextField(
+                                value = entryPriceInput,
+                                onValueChange = { entryPriceInput = it },
+                                label = { Text("Pusu Limit Alış Fiyatı (USDT)", fontSize = 11.sp) },
+                                modifier = Modifier.fillMaxWidth(),
+                                singleLine = true,
+                                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                                colors = OutlinedTextFieldDefaults.colors(
+                                    focusedBorderColor = EmeraldProfitBright,
+                                    unfocusedBorderColor = ObsidianBorder,
+                                    focusedTextColor = Color.White,
+                                    unfocusedTextColor = Color.White
+                                )
+                            )
+
+                            // Quick Price Rounding / Preset Chips
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.spacedBy(6.dp)
+                            ) {
+                                // 1. AI Support / Dip Chip
+                                Surface(
+                                    modifier = Modifier
+                                        .weight(1f)
+                                        .clickable {
+                                            entryPriceInput = String.format(Locale.US, if (defaultSupportPrice < 1.0) "%.4f" else "%.2f", defaultSupportPrice)
+                                        },
+                                    color = ObsidianBg,
+                                    shape = RoundedCornerShape(6.dp),
+                                    border = BorderStroke(0.8.dp, IceCyan.copy(alpha = 0.5f))
+                                ) {
+                                    Text(
+                                        text = "🤖 Dip Destek\n$${String.format(Locale.US, if (defaultSupportPrice < 1.0) "%.4f" else "%.2f", defaultSupportPrice)}",
+                                        color = IceCyanBright,
+                                        fontSize = 9.5.sp,
+                                        lineHeight = 12.sp,
+                                        textAlign = TextAlign.Center,
+                                        modifier = Modifier.padding(horizontal = 4.dp, vertical = 4.dp)
+                                    )
+                                }
+
+                                // 2. Clean Integer / Round Chip
+                                val roundedPrice = if (entryPrice >= 100.0) {
+                                    Math.round(entryPrice).toDouble()
+                                } else if (entryPrice >= 1.0) {
+                                    Math.round(entryPrice * 10.0) / 10.0
+                                } else {
+                                    Math.round(entryPrice * 1000.0) / 1000.0
+                                }
+                                Surface(
+                                    modifier = Modifier
+                                        .weight(1f)
+                                        .clickable {
+                                            entryPriceInput = String.format(Locale.US, if (roundedPrice < 1.0) "%.4f" else if (entryPrice >= 100.0) "%.0f" else "%.2f", roundedPrice)
+                                        },
+                                    color = ObsidianBg,
+                                    shape = RoundedCornerShape(6.dp),
+                                    border = BorderStroke(0.8.dp, GoldWarm.copy(alpha = 0.5f))
+                                ) {
+                                    Text(
+                                        text = "🎯 Düz Yuvarla\n$${String.format(Locale.US, if (roundedPrice < 1.0) "%.4f" else if (entryPrice >= 100.0) "%.0f" else "%.2f", roundedPrice)}",
+                                        color = GoldWarm,
+                                        fontSize = 9.5.sp,
+                                        lineHeight = 12.sp,
+                                        textAlign = TextAlign.Center,
+                                        modifier = Modifier.padding(horizontal = 4.dp, vertical = 4.dp)
+                                    )
+                                }
+
+                                // 3. Current Market Price Chip
+                                Surface(
+                                    modifier = Modifier
+                                        .weight(1f)
+                                        .clickable {
+                                            entryPriceInput = String.format(Locale.US, if (currentPrice < 1.0) "%.4f" else "%.2f", currentPrice)
+                                        },
+                                    color = ObsidianBg,
+                                    shape = RoundedCornerShape(6.dp),
+                                    border = BorderStroke(0.8.dp, ObsidianBorder)
+                                ) {
+                                    Text(
+                                        text = "⚡ Anlık Piyasa\n$${String.format(Locale.US, if (currentPrice < 1.0) "%.4f" else "%.2f", currentPrice)}",
+                                        color = TextSecondary,
+                                        fontSize = 9.5.sp,
+                                        lineHeight = 12.sp,
+                                        textAlign = TextAlign.Center,
+                                        modifier = Modifier.padding(horizontal = 4.dp, vertical = 4.dp)
+                                    )
+                                }
+                            }
+
+                            val dcaDefensePlan = remember(entryPrice, totalAllocatedPool, tech) {
+                                AiAdvisorEngine.calculateDcaDefensePlan(entryPrice, totalAllocatedPool, tech, 2.0)
+                            }
 
                             Surface(
                                 color = ObsidianBg,
@@ -567,9 +670,50 @@ fun CryptoAnalystMasterApp() {
                                         Text("$${String.format(Locale.US, "%.2f", totalAllocatedPool)} USDT", color = IceCyanBright, fontSize = 11.sp, fontWeight = FontWeight.Bold)
                                     }
                                     HorizontalDivider(color = ObsidianBorder, thickness = 0.5.dp)
-                                    Text("• 1. Kademe (İlk Alım): $${String.format(Locale.US, "%.2f", tier1Amount)} USDT (Fiyat: $${String.format(Locale.US, "%.2f", entryPrice)})", color = EmeraldProfitBright, fontSize = 10.5.sp)
-                                    Text("• 2. Kademe (Dip Destek): $${String.format(Locale.US, "%.2f", tier2Amount)} USDT (Gerekirse)", color = GoldWarm, fontSize = 10.5.sp)
-                                    Text("• 3. Kademe (Son Savunma): $${String.format(Locale.US, "%.2f", tier3Amount)} USDT (Gerekirse)", color = IceCyanBright, fontSize = 10.5.sp)
+                                    
+                                    // Tier 1
+                                    val t1 = dcaDefensePlan.tiers[0]
+                                    val t2 = dcaDefensePlan.tiers[1]
+                                    val t3 = dcaDefensePlan.tiers[2]
+
+                                    Text(
+                                        text = "• 1. Kademe (Mevcut Giriş): $${String.format(Locale.US, "%.2f", t1.allocatedUsdt)} USDT (Giriş: $${String.format(Locale.US, if (t1.price < 1.0) "%.4f" else "%.2f", t1.price)})",
+                                        color = EmeraldProfitBright,
+                                        fontSize = 10.5.sp,
+                                        fontWeight = FontWeight.Bold
+                                    )
+                                    Text(
+                                        text = "   🎯 Çıkış Hedefi: $${String.format(Locale.US, if (t1.targetExitPrice < 1.0) "%.4f" else "%.2f", t1.targetExitPrice)} USDT (+%2.0 net)",
+                                        color = EmeraldProfit,
+                                        fontSize = 9.5.sp
+                                    )
+
+                                    // Tier 2
+                                    Text(
+                                        text = "• 2. Kademe (Dip Destek): $${String.format(Locale.US, "%.2f", t2.allocatedUsdt)} USDT (Fiyat: $${String.format(Locale.US, if (t2.price < 1.0) "%.4f" else "%.2f", t2.price)} | -%${String.format(Locale.US, "%.1f", t2.dropPercentFromEntry)})",
+                                        color = GoldWarm,
+                                        fontSize = 10.5.sp,
+                                        fontWeight = FontWeight.Bold
+                                    )
+                                    Text(
+                                        text = "   🛡️ Dolarsa Yeni Ort. Maliyet: $${String.format(Locale.US, if (t2.averageCostPrice < 1.0) "%.4f" else "%.2f", t2.averageCostPrice)} ➔ Yeni Çıkış: $${String.format(Locale.US, if (t2.targetExitPrice < 1.0) "%.4f" else "%.2f", t2.targetExitPrice)}",
+                                        color = GoldWarm.copy(alpha = 0.85f),
+                                        fontSize = 9.5.sp
+                                    )
+
+                                    // Tier 3
+                                    Text(
+                                        text = "• 3. Kademe (Son Savunma): $${String.format(Locale.US, "%.2f", t3.allocatedUsdt)} USDT (Fiyat: $${String.format(Locale.US, if (t3.price < 1.0) "%.4f" else "%.2f", t3.price)} | -%${String.format(Locale.US, "%.1f", t3.dropPercentFromEntry)})",
+                                        color = IceCyanBright,
+                                        fontSize = 10.5.sp,
+                                        fontWeight = FontWeight.Bold
+                                    )
+                                    Text(
+                                        text = "   🛡️ Dolarsa Yeni Ort. Maliyet: $${String.format(Locale.US, if (t3.averageCostPrice < 1.0) "%.4f" else "%.2f", t3.averageCostPrice)} ➔ Yeni Çıkış: $${String.format(Locale.US, if (t3.targetExitPrice < 1.0) "%.4f" else "%.2f", t3.targetExitPrice)}",
+                                        color = IceCyan.copy(alpha = 0.85f),
+                                        fontSize = 9.5.sp
+                                    )
+
                                     HorizontalDivider(color = ObsidianBorder, thickness = 0.5.dp)
                                     Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
                                         Text("🛡️ Dokunulmayan Boş Kasa:", color = TextTertiary, fontSize = 10.5.sp)
@@ -654,7 +798,7 @@ fun CryptoAnalystMasterApp() {
                             }
 
                             Text(
-                                text = "🎯 Hedef Çıkış: $${String.format(Locale.US, "%.2f", targetExit)} (Net +%2.0 kâr + %0.40 Midas komisyonu karşılanır)",
+                                text = "🎯 Hedef Çıkış: $${String.format(Locale.US, if (targetExit < 1.0) "%.4f" else "%.2f", targetExit)} (Net +%2.0 kâr + %0.40 Midas komisyonu karşılanır)",
                                 color = EmeraldProfit,
                                 fontSize = 11.sp,
                                 fontWeight = FontWeight.Bold
@@ -1045,15 +1189,20 @@ fun AddExistingHoldingDialog(
                     }
                 }
 
-                // Live calculations & Midas target preview
+                // Live calculations & Midas target preview & DCA Defense Map
                 if (entryPrice > 0 && coinAmount > 0) {
+                    val dcaDefensePlan = remember(entryPrice, totalInvestedUsdt, targetProfitPct) {
+                        val assumedPool = if (totalInvestedUsdt > 0) totalInvestedUsdt * 3.0 else 60.0
+                        AiAdvisorEngine.calculateDcaDefensePlan(entryPrice, assumedPool, null, targetProfitPct)
+                    }
+
                     Surface(
                         color = ObsidianBg,
                         shape = RoundedCornerShape(8.dp),
                         border = BorderStroke(0.6.dp, EmeraldProfit.copy(alpha = 0.5f)),
                         modifier = Modifier.fillMaxWidth()
                     ) {
-                        Column(modifier = Modifier.padding(10.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                        Column(modifier = Modifier.padding(10.dp), verticalArrangement = Arrangement.spacedBy(5.dp)) {
                             Row(
                                 modifier = Modifier.fillMaxWidth(),
                                 horizontalArrangement = Arrangement.SpaceBetween
@@ -1073,16 +1222,37 @@ fun AddExistingHoldingDialog(
                                 modifier = Modifier.fillMaxWidth(),
                                 horizontalArrangement = Arrangement.SpaceBetween
                             ) {
-                                Text("🎯 Midas Satış Emri:", color = EmeraldProfitBright, fontSize = 11.sp, fontWeight = FontWeight.Bold)
-                                Text("$${String.format(Locale.US, if (calculatedTargetExit < 1.0) "%.4f" else "%.2f", calculatedTargetExit)}", color = EmeraldProfitBright, fontSize = 11.sp, fontWeight = FontWeight.Bold, fontFamily = FontFamily.Monospace)
+                                Text("🎯 Midas'a Girilecek Satış Emri:", color = EmeraldProfitBright, fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                                Text("$${String.format(Locale.US, if (calculatedTargetExit < 1.0) "%.4f" else "%.2f", calculatedTargetExit)} USDT", color = EmeraldProfitBright, fontSize = 11.5.sp, fontWeight = FontWeight.ExtraBold, fontFamily = FontFamily.Monospace)
                             }
                             Row(
                                 modifier = Modifier.fillMaxWidth(),
                                 horizontalArrangement = Arrangement.SpaceBetween
                             ) {
-                                Text("🎯 Satışta Geçecek Tutar:", color = TextSecondary, fontSize = 10.sp)
+                                Text("Satışta Kasanıza Geçecek:", color = TextSecondary, fontSize = 10.sp)
                                 Text("~$${String.format(Locale.US, "%.2f", targetTotalReturnUsdt)} USDT (+%${String.format(Locale.US, "%.1f", targetProfitPct)} net)", color = EmeraldProfit, fontSize = 10.sp, fontWeight = FontWeight.Bold)
                             }
+
+                            // DCA Defense Map Tiers
+                            HorizontalDivider(color = ObsidianBorder, thickness = 0.5.dp, modifier = Modifier.padding(vertical = 2.dp))
+                            Text("🛡️ Düşüşe Karşı Midas Kademeli Alım & Çıkış Haritası:", color = GoldWarm, fontSize = 10.5.sp, fontWeight = FontWeight.Bold)
+
+                            val t2 = dcaDefensePlan.tiers[1]
+                            val t3 = dcaDefensePlan.tiers[2]
+
+                            Text(
+                                text = "• 2. Kademe (Dip Destek): $${String.format(Locale.US, if (t2.price < 1.0) "%.4f" else "%.2f", t2.price)} (-%${String.format(Locale.US, "%.1f", t2.dropPercentFromEntry)})\n   ➔ Dolarsa Yeni Ort. Maliyet: $${String.format(Locale.US, if (t2.averageCostPrice < 1.0) "%.4f" else "%.2f", t2.averageCostPrice)} | Yeni Satış: $${String.format(Locale.US, if (t2.targetExitPrice < 1.0) "%.4f" else "%.2f", t2.targetExitPrice)}",
+                                color = GoldWarm.copy(alpha = 0.9f),
+                                fontSize = 9.5.sp,
+                                lineHeight = 13.sp
+                            )
+
+                            Text(
+                                text = "• 3. Kademe (Son Savunma): $${String.format(Locale.US, if (t3.price < 1.0) "%.4f" else "%.2f", t3.price)} (-%${String.format(Locale.US, "%.1f", t3.dropPercentFromEntry)})\n   ➔ Dolarsa Yeni Ort. Maliyet: $${String.format(Locale.US, if (t3.averageCostPrice < 1.0) "%.4f" else "%.2f", t3.averageCostPrice)} | Yeni Satış: $${String.format(Locale.US, if (t3.targetExitPrice < 1.0) "%.4f" else "%.2f", t3.targetExitPrice)}",
+                                color = IceCyan.copy(alpha = 0.9f),
+                                fontSize = 9.5.sp,
+                                lineHeight = 13.sp
+                            )
                         }
                     }
                 }
@@ -1179,6 +1349,88 @@ fun ConfirmFillDialog(
                         unfocusedTextColor = Color.White
                     )
                 )
+
+                // Quick Price Helper Chips in ConfirmFill
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(6.dp)
+                ) {
+                    val roundedP = if (parsedPrice >= 100.0) {
+                        Math.round(parsedPrice).toDouble()
+                    } else if (parsedPrice >= 1.0) {
+                        Math.round(parsedPrice * 10.0) / 10.0
+                    } else {
+                        Math.round(parsedPrice * 1000.0) / 1000.0
+                    }
+                    Surface(
+                        modifier = Modifier
+                            .weight(1f)
+                            .clickable {
+                                priceInput = String.format(Locale.US, if (roundedP < 1.0) "%.4f" else if (parsedPrice >= 100.0) "%.0f" else "%.2f", roundedP)
+                                if (roundedP > 0 && trade.investedUsdt > 0) {
+                                    val newAmt = (trade.investedUsdt * 0.998) / roundedP
+                                    amountInput = String.format(Locale.US, "%.6f", newAmt).trimEnd('0').trimEnd('.')
+                                }
+                            },
+                        color = ObsidianBg,
+                        shape = RoundedCornerShape(6.dp),
+                        border = BorderStroke(0.8.dp, GoldWarm.copy(alpha = 0.5f))
+                    ) {
+                        Text(
+                            text = "🎯 Düz Yuvarla\n$${String.format(Locale.US, if (roundedP < 1.0) "%.4f" else if (parsedPrice >= 100.0) "%.0f" else "%.2f", roundedP)}",
+                            color = GoldWarm,
+                            fontSize = 9.5.sp,
+                            lineHeight = 12.sp,
+                            textAlign = TextAlign.Center,
+                            modifier = Modifier.padding(horizontal = 4.dp, vertical = 4.dp)
+                        )
+                    }
+
+                    if (currentMarketPrice > 0) {
+                        Surface(
+                            modifier = Modifier
+                                .weight(1f)
+                                .clickable {
+                                    priceInput = String.format(Locale.US, if (currentMarketPrice < 1.0) "%.4f" else "%.2f", currentMarketPrice)
+                                    val newAmt = (trade.investedUsdt * 0.998) / currentMarketPrice
+                                    amountInput = String.format(Locale.US, "%.6f", newAmt).trimEnd('0').trimEnd('.')
+                                },
+                            color = ObsidianBg,
+                            shape = RoundedCornerShape(6.dp),
+                            border = BorderStroke(0.8.dp, IceCyan.copy(alpha = 0.5f))
+                        ) {
+                            Text(
+                                text = "⚡ Anlık Piyasa\n$${String.format(Locale.US, if (currentMarketPrice < 1.0) "%.4f" else "%.2f", currentMarketPrice)}",
+                                color = IceCyanBright,
+                                fontSize = 9.5.sp,
+                                lineHeight = 12.sp,
+                                textAlign = TextAlign.Center,
+                                modifier = Modifier.padding(horizontal = 4.dp, vertical = 4.dp)
+                            )
+                        }
+                    }
+
+                    Surface(
+                        modifier = Modifier
+                            .weight(1f)
+                            .clickable {
+                                priceInput = String.format(Locale.US, if (trade.entryPrice < 1.0) "%.4f" else "%.2f", trade.entryPrice)
+                                amountInput = String.format(Locale.US, "%.6f", trade.coinAmount).trimEnd('0').trimEnd('.')
+                            },
+                        color = ObsidianBg,
+                        shape = RoundedCornerShape(6.dp),
+                        border = BorderStroke(0.8.dp, ObsidianBorder)
+                    ) {
+                        Text(
+                            text = "📌 İlk Emir\n$${String.format(Locale.US, if (trade.entryPrice < 1.0) "%.4f" else "%.2f", trade.entryPrice)}",
+                            color = TextSecondary,
+                            fontSize = 9.5.sp,
+                            lineHeight = 12.sp,
+                            textAlign = TextAlign.Center,
+                            modifier = Modifier.padding(horizontal = 4.dp, vertical = 4.dp)
+                        )
+                    }
+                }
 
                 OutlinedTextField(
                     value = amountInput,
@@ -2591,6 +2843,68 @@ fun LiveAssistantScreen(
                                             fontWeight = FontWeight.Bold
                                         )
                                     }
+                                }
+                            }
+                        }
+
+                        // 3-TIER DCA DEFENSE & EXIT PLAN CARD
+                        val activeDcaPlan = remember(trade.entryPrice, trade.investedUsdt, techMap[trade.symbol]) {
+                            val assumedPool = if (trade.investedUsdt > 0) trade.investedUsdt * (if (trade.dcaLevel == 1) 3.0 else if (trade.dcaLevel == 2) 1.5 else 1.0) else 60.0
+                            AiAdvisorEngine.calculateDcaDefensePlan(trade.entryPrice, assumedPool, techMap[trade.symbol], 2.0)
+                        }
+
+                        Surface(
+                            modifier = Modifier.fillMaxWidth(),
+                            color = ObsidianBg,
+                            shape = RoundedCornerShape(8.dp),
+                            border = BorderStroke(0.6.dp, ObsidianBorder)
+                        ) {
+                            Column(modifier = Modifier.padding(10.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                                Row(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    horizontalArrangement = Arrangement.SpaceBetween,
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    Text("🛡️ Midas Kademeli Emir & Savunma Planı:", color = GoldWarm, fontSize = 10.5.sp, fontWeight = FontWeight.Bold)
+                                    Surface(
+                                        color = if (trade.dcaLevel == 1) EmeraldContainer else if (trade.dcaLevel == 2) GoldContainer else IceCyanContainer,
+                                        shape = RoundedCornerShape(4.dp)
+                                    ) {
+                                        Text(
+                                            text = "${trade.dcaLevel}/${trade.maxDcaLevels}. Kademe",
+                                            color = if (trade.dcaLevel == 1) EmeraldProfitBright else if (trade.dcaLevel == 2) GoldWarm else IceCyanBright,
+                                            fontSize = 9.sp,
+                                            fontWeight = FontWeight.Bold,
+                                            modifier = Modifier.padding(horizontal = 5.dp, vertical = 2.dp)
+                                        )
+                                    }
+                                }
+
+                                val t2 = activeDcaPlan.tiers[1]
+                                val t3 = activeDcaPlan.tiers[2]
+
+                                if (trade.dcaLevel < 2) {
+                                    Text(
+                                        text = "• 2. Kademe (Dip Destek Emri): $${String.format(Locale.US, if (t2.price < 1.0) "%.4f" else "%.2f", t2.price)} (-%${String.format(Locale.US, "%.1f", t2.dropPercentFromEntry)})\n   ➔ Dolarsa Yeni Maliyet: $${String.format(Locale.US, if (t2.averageCostPrice < 1.0) "%.4f" else "%.2f", t2.averageCostPrice)} | Yeni Satış: $${String.format(Locale.US, if (t2.targetExitPrice < 1.0) "%.4f" else "%.2f", t2.targetExitPrice)}",
+                                        color = GoldWarm.copy(alpha = 0.9f),
+                                        fontSize = 9.5.sp,
+                                        lineHeight = 13.sp
+                                    )
+                                }
+
+                                if (trade.dcaLevel < 3) {
+                                    Text(
+                                        text = "• 3. Kademe (Son Savunma Emri): $${String.format(Locale.US, if (t3.price < 1.0) "%.4f" else "%.2f", t3.price)} (-%${String.format(Locale.US, "%.1f", t3.dropPercentFromEntry)})\n   ➔ Dolarsa Yeni Maliyet: $${String.format(Locale.US, if (t3.averageCostPrice < 1.0) "%.4f" else "%.2f", t3.averageCostPrice)} | Yeni Satış: $${String.format(Locale.US, if (t3.targetExitPrice < 1.0) "%.4f" else "%.2f", t3.targetExitPrice)}",
+                                        color = IceCyan.copy(alpha = 0.9f),
+                                        fontSize = 9.5.sp,
+                                        lineHeight = 13.sp
+                                    )
+                                } else {
+                                    Text(
+                                        text = "• 3/3 Kademe Tamamlandı: Başka ekleme yapılmaz, sadece $${String.format(Locale.US, if (trade.targetExitPrice < 1.0) "%.4f" else "%.2f", trade.targetExitPrice)} kârlı çıkış beklenir.",
+                                        color = EmeraldProfitBright,
+                                        fontSize = 9.5.sp
+                                    )
                                 }
                             }
                         }

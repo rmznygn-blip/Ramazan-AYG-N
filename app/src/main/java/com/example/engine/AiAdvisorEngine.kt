@@ -600,4 +600,119 @@ object AiAdvisorEngine {
             }
         }
     }
+
+    /**
+     * Calculates the 3-Tier Zero-Loss DCA defense map based on an entered (or accidental) entry price.
+     * Gives the exact limit buy prices, allocated cash, updated average costs, and net-profit exit targets.
+     */
+    fun calculateDcaDefensePlan(
+        entryPrice: Double,
+        totalPoolUsdt: Double,
+        tech: TechnicalAnalysis5m?,
+        targetProfitPct: Double = 2.0
+    ): DcaDefensePlan {
+        val safeEntry = if (entryPrice > 0) entryPrice else 100.0
+        val safePool = if (totalPoolUsdt > 0) totalPoolUsdt else 60.0
+        val tierAmount = safePool / 3.0
+
+        // Dynamic drop percentages based on ATR if available, else standard -3.5% and -7.0%
+        val tier2Price = if (tech != null && tech.supportLevel > 0 && tech.supportLevel < safeEntry) {
+            tech.supportLevel
+        } else if (tech != null && tech.atr14 > 0) {
+            (safeEntry - (tech.atr14 * 2.0)).coerceIn(safeEntry * 0.94, safeEntry * 0.975)
+        } else {
+            safeEntry * 0.965 // -3.5%
+        }
+
+        val tier3Price = if (tech != null && tech.dcaTier3Price > 0 && tech.dcaTier3Price < tier2Price) {
+            tech.dcaTier3Price
+        } else if (tech != null && tech.atr14 > 0) {
+            (safeEntry - (tech.atr14 * 4.0)).coerceIn(safeEntry * 0.88, safeEntry * 0.94)
+        } else {
+            safeEntry * 0.930 // -7.0%
+        }
+
+        // Tier 1 calculation
+        val t1Coins = (tierAmount * 0.998) / safeEntry
+        val t1AvgCost = safeEntry
+        val t1TargetExit = t1AvgCost * (1.0 + (targetProfitPct + 0.40) / 100.0)
+        val t1ProfitUsdt = tierAmount * (targetProfitPct / 100.0)
+        val t1 = DcaPlanTier(
+            tierNumber = 1,
+            name = "1. Kademe (Mevcut / Giriş)",
+            price = safeEntry,
+            dropPercentFromEntry = 0.0,
+            allocatedUsdt = tierAmount,
+            estimatedCoinAmount = t1Coins,
+            cumulativeInvestedUsdt = tierAmount,
+            averageCostPrice = t1AvgCost,
+            targetExitPrice = t1TargetExit,
+            netProfitUsdt = t1ProfitUsdt
+        )
+
+        // Tier 2 calculation
+        val t2Coins = (tierAmount * 0.998) / tier2Price
+        val cumInvest2 = tierAmount * 2
+        val totalCoins2 = t1Coins + t2Coins
+        val t2AvgCost = cumInvest2 / (totalCoins2 / 0.998)
+        val t2TargetExit = t2AvgCost * (1.0 + (targetProfitPct + 0.40) / 100.0)
+        val t2ProfitUsdt = cumInvest2 * (targetProfitPct / 100.0)
+        val t2 = DcaPlanTier(
+            tierNumber = 2,
+            name = "2. Kademe (Dip Destek Ekleme)",
+            price = tier2Price,
+            dropPercentFromEntry = ((safeEntry - tier2Price) / safeEntry) * 100.0,
+            allocatedUsdt = tierAmount,
+            estimatedCoinAmount = t2Coins,
+            cumulativeInvestedUsdt = cumInvest2,
+            averageCostPrice = t2AvgCost,
+            targetExitPrice = t2TargetExit,
+            netProfitUsdt = t2ProfitUsdt
+        )
+
+        // Tier 3 calculation
+        val t3Coins = (tierAmount * 0.998) / tier3Price
+        val cumInvest3 = tierAmount * 3
+        val totalCoins3 = t1Coins + t2Coins + t3Coins
+        val t3AvgCost = cumInvest3 / (totalCoins3 / 0.998)
+        val t3TargetExit = t3AvgCost * (1.0 + (targetProfitPct + 0.40) / 100.0)
+        val t3ProfitUsdt = cumInvest3 * (targetProfitPct / 100.0)
+        val t3 = DcaPlanTier(
+            tierNumber = 3,
+            name = "3. Kademe (Son Savunma / Taban)",
+            price = tier3Price,
+            dropPercentFromEntry = ((safeEntry - tier3Price) / safeEntry) * 100.0,
+            allocatedUsdt = tierAmount,
+            estimatedCoinAmount = t3Coins,
+            cumulativeInvestedUsdt = cumInvest3,
+            averageCostPrice = t3AvgCost,
+            targetExitPrice = t3TargetExit,
+            netProfitUsdt = t3ProfitUsdt
+        )
+
+        return DcaDefensePlan(
+            entryPrice = safeEntry,
+            totalPoolUsdt = safePool,
+            tiers = listOf(t1, t2, t3)
+        )
+    }
 }
+
+data class DcaPlanTier(
+    val tierNumber: Int,
+    val name: String,
+    val price: Double,
+    val dropPercentFromEntry: Double,
+    val allocatedUsdt: Double,
+    val estimatedCoinAmount: Double,
+    val cumulativeInvestedUsdt: Double,
+    val averageCostPrice: Double,
+    val targetExitPrice: Double,
+    val netProfitUsdt: Double
+)
+
+data class DcaDefensePlan(
+    val entryPrice: Double,
+    val totalPoolUsdt: Double,
+    val tiers: List<DcaPlanTier>
+)
