@@ -1112,7 +1112,7 @@ fun AddExistingHoldingDialog(
 
 /**
  * Interactive dialog to confirm when a pending ambush buy order is filled on Midas.
- * Allows user to verify or tweak actual filled price & filled amount.
+ * Explicitly asks whether the buy order executed on Midas.
  */
 @Composable
 fun ConfirmFillDialog(
@@ -1139,22 +1139,36 @@ fun ConfirmFillDialog(
         shape = RoundedCornerShape(16.dp),
         title = {
             Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                Icon(Icons.Default.CheckCircle, contentDescription = null, tint = EmeraldProfitBright)
-                Text("Midas Alışını Onayla & Satışa Başla", color = TextPrimary, fontSize = 15.sp, fontWeight = FontWeight.Bold)
+                Icon(Icons.Default.HelpOutline, contentDescription = null, tint = IceCyanBright)
+                Text("❓ Midas'ta Alış Gerçekleşti mi?", color = TextPrimary, fontSize = 15.sp, fontWeight = FontWeight.Bold)
             }
         },
         text = {
             Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                Text(
-                    text = "Midas'ta '${trade.symbol}' için bekleyen limit alış emriniz gerçekleşti mi? Midas'taki gerçekleşen alış fiyatı ve adetini onaylayın:",
-                    color = TextSecondary,
-                    fontSize = 11.5.sp
-                )
+                Surface(
+                    color = ObsidianBg,
+                    shape = RoundedCornerShape(8.dp),
+                    border = BorderStroke(0.8.dp, ObsidianBorder)
+                ) {
+                    Column(modifier = Modifier.padding(10.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                        Text(
+                            text = "Midas hesabınızda '${trade.symbol}' için bekleyen limit alış emriniz gerçekleşti (doldu) mu?",
+                            color = TextPrimary,
+                            fontSize = 12.sp,
+                            fontWeight = FontWeight.SemiBold
+                        )
+                        Text(
+                            text = "Eğer Midas'ta alışınız tamamlandıysa aşağıdaki gerçekleşen fiyatı ve adeti onaylayın. Sistem anında satış takibine başlayacaktır.",
+                            color = TextSecondary,
+                            fontSize = 11.sp
+                        )
+                    }
+                }
 
                 OutlinedTextField(
                     value = priceInput,
                     onValueChange = { priceInput = it },
-                    label = { Text("Gerçekleşen Alış Fiyatı (USDT)", fontSize = 11.sp) },
+                    label = { Text("Midas Gerçekleşen Alış Fiyatı (USDT)", fontSize = 11.sp) },
                     modifier = Modifier.fillMaxWidth(),
                     singleLine = true,
                     keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
@@ -1169,7 +1183,7 @@ fun ConfirmFillDialog(
                 OutlinedTextField(
                     value = amountInput,
                     onValueChange = { amountInput = it },
-                    label = { Text("Alınan Varlık Adeti (${trade.symbol})", fontSize = 11.sp) },
+                    label = { Text("Alınan Miktar (${trade.symbol})", fontSize = 11.sp) },
                     modifier = Modifier.fillMaxWidth(),
                     singleLine = true,
                     keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
@@ -1187,7 +1201,7 @@ fun ConfirmFillDialog(
                     border = BorderStroke(1.dp, ObsidianBorder)
                 ) {
                     Column(modifier = Modifier.padding(10.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                        Text("🎯 Onay Sonrası Hedef Limit Satış Emri:", color = EmeraldProfitBright, fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                        Text("🎯 Onay Sonrası Midas'ta Girilecek Limit Satış:", color = EmeraldProfitBright, fontSize = 11.sp, fontWeight = FontWeight.Bold)
                         Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
                             Text("Satış Hedefi (+%2.0 Net):", color = TextSecondary, fontSize = 10.5.sp)
                             Text("$${String.format(Locale.US, if (targetExit < 1.0) "%.4f" else "%.2f", targetExit)} USDT", color = EmeraldProfitBright, fontSize = 11.sp, fontWeight = FontWeight.Bold, fontFamily = FontFamily.Monospace)
@@ -1210,12 +1224,12 @@ fun ConfirmFillDialog(
                 colors = ButtonDefaults.buttonColors(containerColor = EmeraldProfit, contentColor = Color.Black),
                 shape = RoundedCornerShape(8.dp)
             ) {
-                Text("✅ Onayla & Satışı Takip Et", fontWeight = FontWeight.Bold, fontSize = 12.sp)
+                Text("✅ Evet, Alındı (Satışa Başla)", fontWeight = FontWeight.Bold, fontSize = 12.sp)
             }
         },
         dismissButton = {
             TextButton(onClick = onDismiss) {
-                Text("Vazgeç", color = TextSecondary)
+                Text("Hayır, Henüz Beklemede", color = TextSecondary)
             }
         }
     )
@@ -1875,7 +1889,7 @@ fun PendingAmbushCard(
     val cardBorderColor = when {
         isPriceReached -> EmeraldProfitBright
         isExpired -> CoralRedBright
-        else -> GoldWarm
+        else -> IceCyan.copy(alpha = 0.6f)
     }
 
     Surface(
@@ -1900,12 +1914,12 @@ fun PendingAmbushCard(
                         fontFamily = FontFamily.Monospace
                     )
                     Surface(
-                        color = if (isPriceReached) EmeraldContainer else if (isExpired) CoralRed.copy(alpha = 0.2f) else GoldContainer,
+                        color = if (isPriceReached) EmeraldContainer else if (isExpired) CoralRed.copy(alpha = 0.2f) else IceCyan.copy(alpha = 0.15f),
                         shape = RoundedCornerShape(6.dp)
                     ) {
                         Text(
-                            text = if (isPriceReached) "⚡ ALIŞ FİYATINA İNDİ!" else if (isExpired) "⏱️ ${trade.ambushTimeoutMinutes} DK SÜRE DOLDU" else "⏳ MİDAS PUSUSU",
-                            color = if (isPriceReached) EmeraldProfitBright else if (isExpired) CoralRedBright else GoldWarm,
+                            text = if (isPriceReached) "⚡ FİYAT PUSUYA İNDİ!" else if (isExpired) "⏱️ ${trade.ambushTimeoutMinutes} DK SÜRE DOLDU" else "⏳ DÜŞÜŞ BEKLENİYOR",
+                            color = if (isPriceReached) EmeraldProfitBright else if (isExpired) CoralRedBright else IceCyanBright,
                             fontSize = 9.5.sp,
                             fontWeight = FontWeight.Bold,
                             modifier = Modifier.padding(horizontal = 6.dp, vertical = 3.dp)
@@ -1948,7 +1962,7 @@ fun PendingAmbushCard(
                     .fillMaxWidth()
                     .height(4.dp)
                     .clip(RoundedCornerShape(2.dp)),
-                color = if (isExpired) CoralRedBright else if (isPriceReached) EmeraldProfitBright else GoldWarm,
+                color = if (isExpired) CoralRedBright else if (isPriceReached) EmeraldProfitBright else IceCyanBright,
                 trackColor = ObsidianBorder
             )
 
@@ -1977,7 +1991,7 @@ fun PendingAmbushCard(
                 }
             }
 
-            // Alert Box if Price Reached or Timeout
+            // Status & Action Guidance Box
             if (isPriceReached) {
                 Surface(
                     color = EmeraldProfit.copy(alpha = 0.12f),
@@ -1993,7 +2007,7 @@ fun PendingAmbushCard(
                     ) {
                         Icon(Icons.Default.Bolt, contentDescription = null, tint = EmeraldProfitBright, modifier = Modifier.size(16.dp))
                         Text(
-                            text = "⚡ Fiyat pusu seviyesine indi ($${String.format(Locale.US, if (currentPrice < 1.0) "%.4f" else "%.2f", currentPrice)}). Midas'ta emriniz dolduysa alışı onaylayın!",
+                            text = "⚡ Fiyat pusu seviyesine ($${String.format(Locale.US, if (currentPrice < 1.0) "%.4f" else "%.2f", currentPrice)}) indi! Midas'ta emriniz dolduysa aşağıdaki butondan alışınızı onaylayın.",
                             color = EmeraldProfitBright,
                             fontSize = 11.sp,
                             fontWeight = FontWeight.Bold
@@ -2022,6 +2036,28 @@ fun PendingAmbushCard(
                         )
                     }
                 }
+            } else {
+                Surface(
+                    color = ObsidianBg,
+                    shape = RoundedCornerShape(8.dp),
+                    border = BorderStroke(0.8.dp, ObsidianBorder)
+                ) {
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(8.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(6.dp)
+                    ) {
+                        Icon(Icons.Default.Info, contentDescription = null, tint = IceCyanBright, modifier = Modifier.size(14.dp))
+                        Text(
+                            text = "Midas'ta $${String.format(Locale.US, if (trade.entryPrice < 1.0) "%.4f" else "%.2f", trade.entryPrice)} limit alış emriniz açık beklemelidir. Fiyat pusu seviyesine indiğinde sistem alış teyidi isteyecektir.",
+                            color = TextSecondary,
+                            fontSize = 10.5.sp,
+                            lineHeight = 13.sp
+                        )
+                    }
+                }
             }
 
             // Action Buttons
@@ -2032,24 +2068,33 @@ fun PendingAmbushCard(
                 Button(
                     onClick = { onRequestConfirmFill(trade) },
                     modifier = Modifier
-                        .weight(1.3f)
+                        .weight(1.35f)
                         .height(38.dp),
                     shape = RoundedCornerShape(8.dp),
                     colors = ButtonDefaults.buttonColors(
                         containerColor = if (isPriceReached) EmeraldProfit else ObsidianCardElevated,
-                        contentColor = if (isPriceReached) Color.Black else TextPrimary
+                        contentColor = if (isPriceReached) Color.Black else IceCyanBright
                     ),
-                    border = BorderStroke(1.dp, if (isPriceReached) EmeraldProfit else EmeraldProfit.copy(alpha = 0.5f))
+                    border = BorderStroke(1.dp, if (isPriceReached) EmeraldProfit else IceCyan.copy(alpha = 0.4f))
                 ) {
-                    Icon(Icons.Default.Check, contentDescription = null, modifier = Modifier.size(14.dp), tint = if (isPriceReached) Color.Black else EmeraldProfitBright)
+                    Icon(
+                        imageVector = if (isPriceReached) Icons.Default.Check else Icons.Default.HelpOutline,
+                        contentDescription = null,
+                        modifier = Modifier.size(14.dp),
+                        tint = if (isPriceReached) Color.Black else IceCyanBright
+                    )
                     Spacer(modifier = Modifier.width(4.dp))
-                    Text("✅ Midas'ta Alındı", fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                    Text(
+                        text = if (isPriceReached) "🔔 Alış Gerçekleşti mi?" else "❓ Alış Gerçekleşti mi?",
+                        fontSize = 10.5.sp,
+                        fontWeight = FontWeight.Bold
+                    )
                 }
 
                 OutlinedButton(
                     onClick = { onCancelAmbush(trade.id) },
                     modifier = Modifier
-                        .weight(1.1f)
+                        .weight(1.05f)
                         .height(38.dp),
                     shape = RoundedCornerShape(8.dp),
                     colors = ButtonDefaults.outlinedButtonColors(contentColor = CoralRedBright),
