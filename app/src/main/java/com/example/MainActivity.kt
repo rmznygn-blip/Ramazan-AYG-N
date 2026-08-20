@@ -1,17 +1,23 @@
 package com.example
 
+import android.Manifest
 import android.content.ClipData
 import android.content.ClipboardManager
 import android.content.Context
+import android.content.pm.PackageManager
+import android.os.Build
 import android.os.Bundle
 import android.widget.Toast
 import androidx.activity.ComponentActivity
+import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.*
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
+import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
@@ -29,6 +35,8 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.Path
+import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
@@ -36,6 +44,7 @@ import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.core.content.ContextCompat
 import com.example.data.local.*
 import com.example.engine.ActionGuidance
 import com.example.engine.AiAdvisorEngine
@@ -43,6 +52,7 @@ import com.example.model.BinanceOracleData
 import com.example.model.CryptoAsset
 import com.example.model.TechnicalAnalysis5m
 import com.example.repository.CryptoMarketRepository
+import com.example.service.TradeMonitoringService
 import com.example.ui.theme.*
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
@@ -98,6 +108,27 @@ fun CryptoAnalystMasterApp() {
     val coroutineScope = rememberCoroutineScope()
     val db = remember { AppDatabase.getDatabase(context) }
     val dao = remember { db.appDao() }
+
+    // Foreground Service & Notification Permission Request Logic
+    val notificationPermissionLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.RequestPermission()
+    ) { _ ->
+        // Service starts regardless so market websocket and monitoring stay alive
+        TradeMonitoringService.startService(context)
+    }
+
+    LaunchedEffect(Unit) {
+        TradeMonitoringService.startService(context)
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            val permissionStatus = ContextCompat.checkSelfPermission(
+                context,
+                Manifest.permission.POST_NOTIFICATIONS
+            )
+            if (permissionStatus != PackageManager.PERMISSION_GRANTED) {
+                notificationPermissionLauncher.launch(Manifest.permission.POST_NOTIFICATIONS)
+            }
+        }
+    }
 
     var selectedTab by remember { mutableIntStateOf(0) } // 0: Asistan & Emirler, 1: Kasa & Portföy, 2: Hafıza & Arşiv, 3: Haftalık AI Raporu
 
@@ -528,8 +559,11 @@ fun CryptoAnalystMasterApp() {
                 val parsedCustomEntry = parseFlexibleDouble(entryPriceInput) ?: recommendedPlan.price
                 val entryPrice = if (parsedCustomEntry > 0) parsedCustomEntry else recommendedPlan.price
 
-                // Recommend 60% of cash as total allocated pool, max $60, min $30
-                val totalAllocatedPool = (availableCash * 0.60).coerceIn(30.0, 60.0).coerceAtMost(availableCash)
+                // Auto-Compound (Bileşik Getiri) calculation: Expand max trade limit with 50% of realized profit
+                val realizedProfit = historicalTrades.sumOf { it.netProfitUsdt }
+                val compoundBonus = if (realizedProfit > 0) realizedProfit * 0.50 else 0.0 // Kârın %50'si ile işlem bütçesini büyüt
+                val dynamicMaxLimit = 60.0 + compoundBonus
+                val totalAllocatedPool = (availableCash * 0.60).coerceIn(30.0, dynamicMaxLimit).coerceAtMost(availableCash)
                 val tier1Amount = totalAllocatedPool / 3.0
                 val tier2Amount = totalAllocatedPool / 3.0
                 val tier3Amount = totalAllocatedPool / 3.0
@@ -557,6 +591,20 @@ fun CryptoAnalystMasterApp() {
                     },
                     text = {
                         Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                            if (compoundBonus > 0) {
+                                Surface(
+                                    color = EmeraldContainer.copy(alpha = 0.4f),
+                                    shape = RoundedCornerShape(6.dp),
+                                    border = BorderStroke(1.dp, EmeraldProfit.copy(alpha = 0.5f)),
+                                    modifier = Modifier.fillMaxWidth().padding(bottom = 6.dp)
+                                ) {
+                                    Row(modifier = Modifier.padding(8.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                                        Text("🌱", fontSize = 14.sp)
+                                        Text("Bileşik Getiri Aktif: Kârınız sayesinde işlem limitiniz +$${String.format(Locale.US, "%.2f", compoundBonus)} büyüdü!", color = EmeraldProfitBright, fontSize = 10.sp, fontWeight = FontWeight.Bold)
+                                    }
+                                }
+                            }
+
                             // 3 Dynamic Strategy Selection Cards
                             Text(
                                 text = "🎯 Giriş Stratejisi Seçin (Yapay Zekâ Yönlendirmeli):",
@@ -3130,6 +3178,15 @@ fun LiveAssistantScreen(
                         }
                     }
 
+                    // LIVE MINI SPARKLINE CHART
+                    MiniSparkline(
+                        points = asset.sparklinePoints,
+                        lineColor = if (asset.isPositive) EmeraldProfit else CoralRed,
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(40.dp)
+                    )
+
                     // PROMINENT ENTRY & EXIT TARGET CARDS
                     Row(
                         modifier = Modifier.fillMaxWidth(),
@@ -4128,5 +4185,70 @@ fun WeeklyReportScreen(
                 }
             }
         }
+    }
+}
+
+/**
+ * Pure Jetpack Compose Canvas Mini Sparkline with dynamic gradient fill.
+ */
+@Composable
+fun MiniSparkline(
+    points: List<Float>,
+    lineColor: Color,
+    modifier: Modifier = Modifier
+) {
+    if (points.isEmpty()) return
+
+    Canvas(modifier = modifier) {
+        val width = size.width
+        val height = size.height
+        if (width <= 0f || height <= 0f) return@Canvas
+
+        val minVal = points.minOrNull() ?: 0f
+        val maxVal = points.maxOrNull() ?: 1f
+        val range = (maxVal - minVal).let { if (it == 0f) 1f else it }
+
+        val strokePath = Path()
+        val fillPath = Path()
+
+        val stepX = if (points.size > 1) width / (points.size - 1) else width
+
+        points.forEachIndexed { index, value ->
+            val x = index * stepX
+            val normalizedY = (value - minVal) / range
+            val y = height - (normalizedY * (height - 8.dp.toPx()) + 4.dp.toPx())
+
+            if (index == 0) {
+                strokePath.moveTo(x, y)
+                fillPath.moveTo(x, height)
+                fillPath.lineTo(x, y)
+            } else {
+                strokePath.lineTo(x, y)
+                fillPath.lineTo(x, y)
+            }
+
+            if (index == points.size - 1) {
+                fillPath.lineTo(x, height)
+                fillPath.close()
+            }
+        }
+
+        // 1. Draw gradient area underneath the sparkline
+        drawPath(
+            path = fillPath,
+            brush = Brush.verticalGradient(
+                colors = listOf(
+                    lineColor.copy(alpha = 0.28f),
+                    Color.Transparent
+                )
+            )
+        )
+
+        // 2. Draw 2.dp stroke line on top
+        drawPath(
+            path = strokePath,
+            color = lineColor,
+            style = Stroke(width = 2.dp.toPx())
+        )
     }
 }

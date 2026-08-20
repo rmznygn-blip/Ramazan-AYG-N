@@ -2,6 +2,7 @@ package com.example.service
 
 import android.util.Log
 import com.example.BuildConfig
+import com.example.data.local.AppTradeEntity
 import com.example.model.TechnicalAnalysis5m
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
@@ -15,8 +16,8 @@ import java.net.URL
 import java.util.Locale
 
 /**
- * Dual-Engine AI Quantitative Trade Mentor & Auto-Optimizer
- * Primary Engine: gemini-3.1-pro-preview (Deep reasoning & mathematical explanations)
+ * Dual-Engine AI Quantitative Trade Mentor & Auto-Optimizer with RAG Memory Architecture
+ * Primary Engine: gemini-3.1-pro-preview (Deep reasoning, mathematical explanations & past trade memory)
  * Secondary Fail-over Engine: gemini-3.1-flash-lite-preview (Ultra-fast fail-over emergency routing)
  */
 object GeminiMarketAnalystService {
@@ -45,9 +46,10 @@ object GeminiMarketAnalystService {
         tech: TechnicalAnalysis5m?,
         targetNetProfitPercent: Double = 2.0,
         tierName: String = "1. Kademe",
-        coinWinRate: Double = 100.0
+        coinWinRate: Double = 100.0,
+        recentTrades: List<AppTradeEntity> = emptyList()
     ): Pair<String, EngineStatus> = withContext(Dispatchers.IO) {
-        val cacheKey = "${symbol}_${String.format(Locale.US, "%.2f", currentPrice)}_${tech?.confluenceScore ?: 0}"
+        val cacheKey = "${symbol}_${String.format(Locale.US, "%.2f", currentPrice)}_${tech?.confluenceScore ?: 0}_${recentTrades.size}"
         val cached = analysisCache[cacheKey]
         val now = System.currentTimeMillis()
         if (cached != null && (now - cached.first) < 90_000L) {
@@ -67,20 +69,37 @@ object GeminiMarketAnalystService {
         val bidRatio = tech?.orderBookDepth?.bidRatio ?: 0.50
         val volumeShock = tech?.isVolumeShock ?: false
 
-        // Prompt for Primary Gemini Pro
+        // RAG: Format user trade memory for the last 5 completed/active trades
+        val tradeMemorySummary = if (recentTrades.isNotEmpty()) {
+            recentTrades.takeLast(5).joinToString("; ") { trade ->
+                val profitPrefix = if (trade.netProfitUsdt >= 0) "+$" else "-$"
+                val profitStatus = if (trade.netProfitUsdt >= 0) "Kâr" else "Zarar"
+                val amountStr = String.format(Locale.US, "%.2f", Math.abs(trade.netProfitUsdt))
+                "${trade.symbol}/USDT: $profitPrefix$amountStr $profitStatus"
+            }
+        } else {
+            "Henüz geçmiş işlem kaydı yok (İlk işlemler)."
+        }
+
+        // Prompt for Primary Gemini Pro with RAG Context
         val proPrompt = """
-            Sen kurumsal bir Yapay Zeka Kantitatif Algoritma Uzmanı ve Trade Mentorüsün. 
-            Midas Kripto (USDT) kullanıcısı için akşam seansında $symbol/USDT paritesindeki 5m canlı teknik verileri analiz et.
+            Sen kurumsal bir Yapay Zeka Kantitatif Algoritma Uzmanı, Portföy/Fon Yöneticisi ve Trade Mentorüsün. 
+            Midas Kripto (USDT) kullanıcısı için akşam seansında $symbol/USDT paritesindeki 5m canlı teknik verileri ve kullanıcının geçmiş işlem hafızasını analiz et.
+
             KATI KURALLAR:
             - Asla stop-loss önerme (sistemde sıfır zarar ve 3 kademeli ATR DCA uygulanır).
             - Midas komisyonu (%0.40) düşüldükten sonra net %$targetNetProfitPercent kâr hedeflenir.
-            - Yanıtını MAKSİMUM 2-3 KISA, KLİNİK VE MATEMATİKSEL CÜMLE ile açıkla (Örn: ATR sıkışması, Z-Score sapması, tahtadaki alıcı duvarı ve pusu gerekçesi).
+            - Kullanıcının işlem hafızasına (geçmiş işlemlerine) mutlaka bak. Eğer bu coinden son işlemlerde kâr edilmişse 'Daha önce kazandığımız gibi...' diyerek güven ver. Eğer zarar edilmişse veya durgunsa ekstra temkinli uyarılarda bulun.
+            - Yanıtını MAKSİMUM 2-3 KISA, KLİNİK VE MATEMATİKSEL CÜMLE ile açıkla (Örn: ATR sıkışması, Z-Score sapması, tahtadaki alıcı duvarı, işlem hafızası ve pusu gerekçesi).
+
+            KULLANICI İŞLEM HAFIZASI:
+            $tradeMemorySummary
 
             CANLI VERİLER:
             - Parite: $symbol/USDT
             - Anlık Fiyat: $$currentPrice
             - Destek (Pusu Girişi): $$supportLevel
-            - Z-Score Sapması: ${String.format(Locale.US, "%.2f", zScore)} (<-2.5 ise ekstrem dip)
+            - Z-Score Sapması: ${String.format(Locale.US, "%.2f", zScore)} (<-2.0 ise ekstrem dip)
             - RSI (14, 5m): ${String.format(Locale.US, "%.1f", rsi14)}
             - ATR (14): ${String.format(Locale.US, "%.2f", atr)}
             - Binance Emir Defteri Alıcı Ağırlığı: %${String.format(Locale.US, "%.0f", bidRatio * 100)}
@@ -103,11 +122,11 @@ object GeminiMarketAnalystService {
 
             // 2. Fail-Over to Secondary Engine (Gemini 3.1 Flash-Lite)
             try {
-                val flashLitePrompt = "Sinyal doğrulandı. Midas'ta $symbol $tierName emrini onaylıyor musun? Çok kısa tek cümle yanıt ver."
+                val flashLitePrompt = "Sinyal doğrulandı. Midas'ta $symbol $tierName emrini geçmiş hafızayı ($tradeMemorySummary) gözeterek onaylıyor musun? Çok kısa tek cümle yanıt ver."
                 val flashLiteResponse = callGeminiRestApi(BACKUP_MODEL, apiKey, flashLitePrompt)
                 if (flashLiteResponse.isNotBlank()) {
                     currentActiveEngine = EngineStatus.BACKUP_FLASH_LITE
-                    val template = "🚨 [YEDEK MOTOR AKTİF]: Sinyal onaylandı. Midas'tan $tierName kademesini icra et. Teknik güven: Orta. ($symbol RSI: ${String.format(Locale.US, "%.1f", rsi14)}, Alıcı Duvarı: %${String.format(Locale.US, "%.0f", bidRatio * 100)})"
+                    val template = "🚨 [YEDEK MOTOR AKTİF]: Sinyal onaylandı. Midas'tan $tierName kademesini icra et. ($symbol RSI: ${String.format(Locale.US, "%.1f", rsi14)}, Alıcı Duvarı: %${String.format(Locale.US, "%.0f", bidRatio * 100)})"
                     analysisCache[cacheKey] = Pair(now, template)
                     return@withContext Pair(template, currentActiveEngine)
                 }
@@ -181,7 +200,7 @@ object GeminiMarketAnalystService {
         throw RuntimeException("HTTP Error $responseCode")
     }
 
-    suspend fun generateWeekendOptimizationReport(trades: List<com.example.data.local.AppTradeEntity>): String {
+    suspend fun generateWeekendOptimizationReport(trades: List<AppTradeEntity>): String {
         val totalTrades = trades.size
         val winRate = if (totalTrades > 0) 100.0 else 100.0
         val netProfit = trades.sumOf { it.netProfitUsdt }

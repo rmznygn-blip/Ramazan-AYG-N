@@ -233,7 +233,7 @@ object AiAdvisorEngine {
         if (bestOpportunity != null && highestScore >= 60) {
             val (asset, tech) = bestOpportunity
             val currentPrice = if (asset.rawPrice > 0) asset.rawPrice else tech.currentPrice
-            val strategyAnalysis = evaluateSmartEntryStrategies(asset, tech, currentPrice)
+            val strategyAnalysis = evaluateSmartEntryStrategies(asset, tech, currentPrice, capitalProfile)
             val recommendedPlan = strategyAnalysis.options.firstOrNull { it.isRecommended } ?: strategyAnalysis.options[0]
             val entryLimit = recommendedPlan.price
             // Net 2.0% profit target + 0.40% total Midas buy/sell commission
@@ -707,27 +707,34 @@ object AiAdvisorEngine {
     fun evaluateSmartEntryStrategies(
         asset: CryptoAsset,
         tech: TechnicalAnalysis5m?,
-        currentPrice: Double
+        currentPrice: Double,
+        capitalProfile: CapitalProfileEntity? = null
     ): CoinEntryStrategyAnalysis {
         val safeCurrent = if (asset.rawPrice > 0) asset.rawPrice else if (currentPrice > 0) currentPrice else (tech?.currentPrice ?: 100.0)
 
+        // Dynamic Vault Shield (Kasa Kalkanı): If cash ratio is below 50%, force DEEP_DIP mode
+        val availableCash = capitalProfile?.availableCashUsdt ?: 100.0
+        val totalCash = if (capitalProfile != null && capitalProfile.totalDepositedUsdt > 0) capitalProfile.totalDepositedUsdt else availableCash
+        val cashRatio = if (totalCash > 0) availableCash / totalCash else 1.0
+        val isShieldActive = cashRatio < 0.50
+
         // 1. FAST_TREND: Pullback to EMA9 or 0.35% - 0.50% below current price
         val ema9 = tech?.ema9 ?: (safeCurrent * 0.996)
-        val fastPrice = if (ema9 > 0 && ema9 in (safeCurrent * 0.990)..(safeCurrent * 0.998)) {
+        val fastPrice = if (ema9 > 0 && ema9 in (safeCurrent * 0.985)..(safeCurrent * 0.998)) {
             ema9
         } else {
             safeCurrent * 0.9960 // -0.40%
         }
 
         // 2. BALANCED_SUPPORT: Pullback to Bollinger Middle / EMA21 or 0.8% - 1.2% below
-        val ema21 = tech?.ema21 ?: (safeCurrent * 0.990)
-        val bbMid = tech?.bollingerMiddle ?: (safeCurrent * 0.990)
-        val balancedPrice = if (bbMid > 0 && bbMid in (safeCurrent * 0.982)..(safeCurrent * 0.994)) {
+        val ema21 = tech?.ema21 ?: (safeCurrent * 0.992)
+        val bbMid = tech?.bollingerMiddle ?: (safeCurrent * 0.992)
+        val balancedPrice = if (bbMid > 0 && bbMid in (safeCurrent * 0.970)..(safeCurrent * 0.995)) {
             bbMid
-        } else if (ema21 > 0 && ema21 in (safeCurrent * 0.982)..(safeCurrent * 0.994)) {
+        } else if (ema21 > 0 && ema21 in (safeCurrent * 0.970)..(safeCurrent * 0.995)) {
             ema21
         } else {
-            safeCurrent * 0.9900 // -1.0%
+            safeCurrent * 0.9920 // -0.80%
         }
 
         // 3. DEEP_DIP: Full dynamic support / Bollinger Lower / 1.8% - 2.5% below
@@ -738,22 +745,23 @@ object AiAdvisorEngine {
             safeCurrent * 0.9820 // -1.8%
         }
 
-        // AI Recommendation Logic based on Trend, Momentum & RSI:
-        // If market has strong upward momentum (RSI > 50, price > ema21), deep dips won't trigger -> FAST_TREND is recommended!
+        // AI Recommendation Logic based on Vault Shield, Trend, Momentum & RSI:
         val rsi = tech?.rsi14 ?: 50.0
-        val isBullishTrend = (rsi >= 50.0 && safeCurrent >= (tech?.ema21 ?: 0.0)) || (tech?.confluenceScore ?: 50) >= 65
+        val isBullishTrend = (rsi >= 45.0 && safeCurrent >= (tech?.ema21 ?: 0.0)) || (tech?.confluenceScore ?: 50) >= 60
         val isOversoldOrDip = rsi <= 38.0 || (tech?.isZScoreDip == true) || ((tech?.distanceToSupportPercent ?: 2.0) <= 0.60)
 
         val recommendedType = when {
+            isShieldActive -> SmartEntryType.DEEP_DIP
             isOversoldOrDip -> SmartEntryType.DEEP_DIP
             isBullishTrend -> SmartEntryType.FAST_TREND
             else -> SmartEntryType.BALANCED_SUPPORT
         }
 
-        val aiReason = when (recommendedType) {
-            SmartEntryType.FAST_TREND -> "Yükseliş trendi aktif (RSI: ${String.format(Locale.US, "%.0f", rsi)}). Fiyat derin desteğe inmeden mikro çekilmede yakalamak için Hızlı Giriş önerilir. Düşüşe karşı 2. ve 3. kademeler hazırdır."
-            SmartEntryType.DEEP_DIP -> "Fiyat zaten aşırı satım/dip bölgesinde (RSI: ${String.format(Locale.US, "%.0f", rsi)}). Maksimum kâr potansiyeli için ana tabandan Dip Avcısı önerilir."
-            SmartEntryType.BALANCED_SUPPORT -> "Piyasa dengeli konsolidasyonda. 30-45 dk içinde dolma ihtimali en dengeli olan Mikro Destek seviyesi önerilir."
+        val aiReason = when {
+            isShieldActive -> "🛡️ KASA KALKANI AKTİF: Nakit oranınız %50'nin altına düştüğü için risk minimize edildi. Cephaneyi korumak adına sadece ekstrem Dip Avcısı seviyesinden pusu önerilir."
+            recommendedType == SmartEntryType.FAST_TREND -> "Yükseliş trendi aktif (RSI: ${String.format(Locale.US, "%.0f", rsi)}). Fiyat derin desteğe inmeden mikro çekilmede yakalamak için Hızlı Giriş önerilir. Düşüşe karşı 2. ve 3. kademeler hazırdır."
+            recommendedType == SmartEntryType.DEEP_DIP -> "Fiyat zaten aşırı satım/dip bölgesinde (RSI: ${String.format(Locale.US, "%.0f", rsi)}). Maksimum kâr potansiyeli için ana tabandan Dip Avcısı önerilir."
+            else -> "Piyasa dengeli konsolidasyonda. 30-45 dk içinde dolma ihtimali en dengeli olan Mikro Destek seviyesi önerilir."
         }
 
         val fastDrop = ((safeCurrent - fastPrice) / safeCurrent) * 100.0

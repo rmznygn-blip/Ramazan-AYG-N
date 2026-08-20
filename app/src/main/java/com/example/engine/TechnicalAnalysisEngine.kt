@@ -56,7 +56,7 @@ object TechnicalAnalysisEngine {
 
         // 3. Z-Score Deviation (Statistical quant indicator)
         val zScore = (currentPrice - sma20) / stdDev
-        val isZScoreDip = zScore < -2.5
+        val isZScoreDip = zScore < -2.0
         val isPriceBelowBollingerLower = currentPrice <= bbLower
 
         // 4. ATR (14 Periods - Dynamic Volatility Engine)
@@ -79,7 +79,11 @@ object TechnicalAnalysisEngine {
 
         // 7. Dynamic Support and Resistance
         val swingLow = lows.takeLast(15).minOrNull() ?: currentPrice
-        val dynamicSupport = min(bbLower, min(ema50, swingLow))
+        val dynamicSupport = if (currentPrice >= ema21) {
+            max(ema21, swingLow)
+        } else {
+            max(bbLower, swingLow)
+        }
         val swingHigh = highs.takeLast(15).maxOrNull() ?: currentPrice
         val dynamicResistance = max(bbUpper, max(ema9, swingHigh))
 
