@@ -126,6 +126,15 @@ fun CryptoAnalystMasterApp() {
     // Dialog state for updating target exit price
     var tradeToUpdateTarget by remember { mutableStateOf<Pair<AppTradeEntity, Double>?>(null) }
 
+    // Dialog state for startup cash verification (asks if cash is same, remembers all state)
+    var showStartupCheckDialog by remember { mutableStateOf(true) }
+
+    // Dialog state for quick manual cash balance adjustment from topbar or anywhere
+    var showQuickCashDialog by remember { mutableStateOf(false) }
+
+    // Dialog state for factory resetting all data and capital
+    var showResetAllConfirmDialog by remember { mutableStateOf(false) }
+
     // Realtime AI action guidance synthesized across capital + live 5m indicators
     val realtimeGuidance = remember(capitalProfile, activeTrades, cryptoAssets, binanceOracleMap, technicalAnalysisMap) {
         AiAdvisorEngine.computeRealtimeGuidance(
@@ -182,6 +191,32 @@ fun CryptoAnalystMasterApp() {
                     }
 
                     Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                        // Quick Cash Button in TopBar
+                        Surface(
+                            onClick = { showQuickCashDialog = true },
+                            color = ObsidianCard,
+                            shape = RoundedCornerShape(8.dp),
+                            border = BorderStroke(1.dp, IceCyanBright.copy(alpha = 0.4f))
+                        ) {
+                            Row(
+                                modifier = Modifier.padding(horizontal = 7.dp, vertical = 4.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(4.dp)
+                            ) {
+                                Text("💵", fontSize = 11.sp)
+                                val isInit = capitalProfile?.isInitialized == true
+                                val cashVal = capitalProfile?.availableCashUsdt ?: 0.0
+                                Text(
+                                    text = if (isInit) "$${String.format(Locale.US, "%.1f", cashVal)}" else "Kasa Gir",
+                                    color = if (isInit) EmeraldProfitBright else IceCyanBright,
+                                    fontSize = 11.5.sp,
+                                    fontWeight = FontWeight.ExtraBold,
+                                    fontFamily = FontFamily.Monospace
+                                )
+                                Icon(Icons.Default.Edit, contentDescription = null, tint = IceCyanBright, modifier = Modifier.size(11.dp))
+                            }
+                        }
+
                         Surface(
                             color = ObsidianCard,
                             shape = RoundedCornerShape(8.dp),
@@ -380,6 +415,9 @@ fun CryptoAnalystMasterApp() {
                         coroutineScope.launch {
                             AiAdvisorEngine.executeDcaStep(dao, tradeId, dcaPrice, dcaAmount)
                         }
+                    },
+                    onResetAllData = {
+                        showResetAllConfirmDialog = true
                     }
                 )
                 2 -> MemoryAndArchiveScreen(
@@ -554,23 +592,90 @@ fun CryptoAnalystMasterApp() {
                 )
             }
 
-            // 4. DIALOG: UPDATE TARGET EXIT PRICE
-            tradeToUpdateTarget?.let { (trade, currentMarketPrice) ->
-                UpdateTargetDialog(
-                    trade = trade,
-                    currentMarketPrice = currentMarketPrice,
-                    onDismiss = { tradeToUpdateTarget = null },
-                    onConfirm = { newTargetPrice ->
+            // 5. DIALOG: INITIAL SETUP (IF UNINITIALIZED) OR STARTUP CASH CHECK
+            val isInitialized = capitalProfile?.isInitialized == true
+
+            if (!isInitialized) {
+                InitialSetupCashDialog(
+                    onConfirm = { initialCash ->
                         coroutineScope.launch {
-                            val updated = AiAdvisorEngine.updateTradeTarget(dao, trade.id, newTargetPrice)
-                            if (updated != null) {
-                                Toast.makeText(
-                                    context,
-                                    "🎯 ${trade.symbol} Yeni Satış Hedefi: $${String.format(Locale.US, if (newTargetPrice < 1.0) "%.4f" else "%.2f", newTargetPrice)} USDT",
-                                    Toast.LENGTH_SHORT
-                                ).show()
-                            }
-                            tradeToUpdateTarget = null
+                            AiAdvisorEngine.setInitialCashBalance(dao, initialCash)
+                            Toast.makeText(context, "🚀 Midas USDT Kasanız Başlatıldı: $${String.format(Locale.US, "%.2f", initialCash)}", Toast.LENGTH_LONG).show()
+                            showStartupCheckDialog = false
+                        }
+                    }
+                )
+            } else if (showStartupCheckDialog) {
+                StartupCashCheckDialog(
+                    capitalProfile = capitalProfile,
+                    activeTradesCount = activeTrades.size,
+                    onDismiss = { showStartupCheckDialog = false },
+                    onConfirmCurrent = {
+                        showStartupCheckDialog = false
+                    },
+                    onUpdateCash = { newCash ->
+                        coroutineScope.launch {
+                            AiAdvisorEngine.auditCashUpdate(dao, newCash)
+                            Toast.makeText(context, "💵 Kasa Güncellendi: $${String.format(Locale.US, "%.2f", newCash)} USDT", Toast.LENGTH_SHORT).show()
+                            showStartupCheckDialog = false
+                        }
+                    }
+                )
+            }
+
+            // 6. DIALOG: QUICK CASH ADJUSTMENT
+            if (showQuickCashDialog) {
+                QuickCashUpdateDialog(
+                    currentCash = capitalProfile?.availableCashUsdt ?: 0.0,
+                    onDismiss = { showQuickCashDialog = false },
+                    onConfirm = { newCash ->
+                        coroutineScope.launch {
+                            AiAdvisorEngine.auditCashUpdate(dao, newCash)
+                            Toast.makeText(context, "💵 Kasa Güncellendi: $${String.format(Locale.US, "%.2f", newCash)} USDT", Toast.LENGTH_SHORT).show()
+                            showQuickCashDialog = false
+                        }
+                    }
+                )
+            }
+
+            // 7. DIALOG: FACTORY RESET ALL DATA
+            if (showResetAllConfirmDialog) {
+                AlertDialog(
+                    onDismissRequest = { showResetAllConfirmDialog = false },
+                    containerColor = ObsidianCard,
+                    shape = RoundedCornerShape(16.dp),
+                    title = {
+                        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                            Icon(Icons.Default.DeleteForever, contentDescription = null, tint = CoralRed)
+                            Text("Tüm Verileri & Kasayı Sıfırla?", color = TextPrimary, fontSize = 15.sp, fontWeight = FontWeight.Bold)
+                        }
+                    },
+                    text = {
+                        Text(
+                            text = "Tüm açık ve geçmiş işlemler, kasa kayıtları ve karne hafızası silinerek uygulama ilk açılış durumuna (sıfır veri) döndürülecektir. Yeni nakdinizi sıfırdan girmeniz istenecektir.\n\nOnaylıyor musunuz?",
+                            color = TextSecondary,
+                            fontSize = 12.sp,
+                            lineHeight = 16.sp
+                        )
+                    },
+                    confirmButton = {
+                        Button(
+                            onClick = {
+                                coroutineScope.launch {
+                                    AiAdvisorEngine.resetAllDatabase(dao)
+                                    Toast.makeText(context, "🔄 Tüm veriler sıfırlandı! Yeni kasanızı tanımlayabilirsiniz.", Toast.LENGTH_LONG).show()
+                                    showResetAllConfirmDialog = false
+                                }
+                            },
+                            colors = ButtonDefaults.buttonColors(containerColor = CoralRed, contentColor = Color.White),
+                            shape = RoundedCornerShape(8.dp)
+                        ) {
+                            Text("Evet, Her Şeyi Sıfırla", fontWeight = FontWeight.Bold, fontSize = 12.sp)
+                        }
+                    },
+                    dismissButton = {
+                        TextButton(onClick = { showResetAllConfirmDialog = false }) {
+                            Text("İptal", color = TextSecondary)
                         }
                     }
                 )
@@ -1085,6 +1190,358 @@ fun UpdateTargetDialog(
         dismissButton = {
             TextButton(onClick = onDismiss) {
                 Text("Vazgeç", color = TextSecondary)
+            }
+        }
+    )
+}
+
+/**
+ * Clean slate initial setup dialog shown when app is first installed or reset.
+ * Prompts user to input their real initial Midas USDT balance directly (e.g. 44.73 USD).
+ */
+@Composable
+fun InitialSetupCashDialog(
+    onConfirm: (Double) -> Unit
+) {
+    var inputStr by remember { mutableStateOf("") }
+
+    AlertDialog(
+        onDismissRequest = { /* Modal force setup */ },
+        containerColor = ObsidianCard,
+        shape = RoundedCornerShape(16.dp),
+        title = {
+            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                Icon(Icons.Default.AccountBalanceWallet, contentDescription = null, tint = EmeraldProfitBright)
+                Text(
+                    text = "Midas USDT Kasanızı Tanımlayın",
+                    color = TextPrimary,
+                    fontSize = 15.sp,
+                    fontWeight = FontWeight.ExtraBold
+                )
+            }
+        },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                Text(
+                    text = "Midas Kripto cüzdanınızdaki güncel boş USDT nakdinizi girin. Tüm 3 kademeli bütçe ve analiz önerileri bu gerçek nakde göre planlanır:",
+                    color = TextSecondary,
+                    fontSize = 11.5.sp,
+                    lineHeight = 15.sp
+                )
+
+                OutlinedTextField(
+                    value = inputStr,
+                    onValueChange = { inputStr = it },
+                    label = { Text("Kullanılabilir USDT", fontSize = 11.sp) },
+                    placeholder = { Text("Örn: 44.73 veya 44,73", fontSize = 11.sp) },
+                    modifier = Modifier.fillMaxWidth(),
+                    singleLine = true,
+                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                    colors = OutlinedTextFieldDefaults.colors(
+                        focusedBorderColor = IceCyanBright,
+                        unfocusedBorderColor = ObsidianBorder,
+                        focusedTextColor = Color.White,
+                        unfocusedTextColor = Color.White
+                    )
+                )
+
+                // Quick preset chips
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(5.dp)
+                ) {
+                    listOf(30.0, 44.73, 50.0, 100.0, 200.0).forEach { preset ->
+                        Surface(
+                            color = ObsidianCardElevated,
+                            shape = RoundedCornerShape(6.dp),
+                            border = BorderStroke(0.5.dp, ObsidianBorder),
+                            modifier = Modifier
+                                .weight(1f)
+                                .clickable {
+                                    inputStr = if (preset % 1.0 == 0.0) preset.toInt().toString() else String.format(Locale.US, "%.2f", preset)
+                                }
+                        ) {
+                            Text(
+                                text = "$${if (preset % 1.0 == 0.0) preset.toInt().toString() else String.format(Locale.US, "%.2f", preset)}",
+                                color = IceCyanBright,
+                                fontSize = 10.5.sp,
+                                fontWeight = FontWeight.Bold,
+                                fontFamily = FontFamily.Monospace,
+                                modifier = Modifier.padding(vertical = 5.dp),
+                                textAlign = androidx.compose.ui.text.style.TextAlign.Center
+                            )
+                        }
+                    }
+                }
+            }
+        },
+        confirmButton = {
+            Button(
+                onClick = {
+                    val parsed = parseFlexibleDouble(inputStr)
+                    if (parsed != null && parsed >= 0.0) {
+                        onConfirm(parsed)
+                    }
+                },
+                enabled = parseFlexibleDouble(inputStr) != null,
+                colors = ButtonDefaults.buttonColors(containerColor = EmeraldProfit, contentColor = Color.Black),
+                shape = RoundedCornerShape(8.dp)
+            ) {
+                Text("🚀 Kasanızı Kaydet & Başla", fontWeight = FontWeight.Bold, fontSize = 12.sp)
+            }
+        }
+    )
+}
+
+/**
+ * Startup dialog that remembers all past portfolio state,
+ * politely checks if Midas USDT cash balance is the same,
+ * and allows instant 1-tap confirmation or quick updating.
+ */
+@Composable
+fun StartupCashCheckDialog(
+    capitalProfile: CapitalProfileEntity?,
+    activeTradesCount: Int,
+    onDismiss: () -> Unit,
+    onConfirmCurrent: () -> Unit,
+    onUpdateCash: (Double) -> Unit
+) {
+    val currentCash = capitalProfile?.availableCashUsdt ?: 0.0
+    var isEditing by remember { mutableStateOf(false) }
+    var inputStr by remember { mutableStateOf(String.format(Locale.US, "%.2f", currentCash)) }
+
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        containerColor = ObsidianCard,
+        shape = RoundedCornerShape(16.dp),
+        title = {
+            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                Icon(Icons.Default.AccountBalanceWallet, contentDescription = null, tint = EmeraldProfitBright)
+                Text(
+                    text = "Midas USDT Kasanız Güncel mi?",
+                    color = TextPrimary,
+                    fontSize = 15.sp,
+                    fontWeight = FontWeight.ExtraBold
+                )
+            }
+        },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                Text(
+                    text = "Tüm açık pozisyonlarınız ($activeTradesCount adet) ve analiz hafızanız korundu. Midas'taki kullanılabilir USDT kasanızı onaylayın:",
+                    color = TextSecondary,
+                    fontSize = 11.5.sp,
+                    lineHeight = 15.sp
+                )
+
+                Surface(
+                    color = ObsidianBg,
+                    shape = RoundedCornerShape(12.dp),
+                    border = BorderStroke(1.dp, if (isEditing) IceCyanBright else ObsidianBorder),
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Column(modifier = Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Text("Kayıtlı Boş Nakit:", color = TextSecondary, fontSize = 11.sp)
+                            Text(
+                                text = "$${String.format(Locale.US, "%.2f", currentCash)} USDT",
+                                color = EmeraldProfitBright,
+                                fontSize = 15.5.sp,
+                                fontWeight = FontWeight.ExtraBold,
+                                fontFamily = FontFamily.Monospace
+                            )
+                        }
+
+                        if (!isEditing) {
+                            OutlinedButton(
+                                onClick = { isEditing = true },
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .height(36.dp),
+                                shape = RoundedCornerShape(8.dp),
+                                colors = ButtonDefaults.outlinedButtonColors(contentColor = IceCyanBright),
+                                border = BorderStroke(1.dp, IceCyanBright.copy(alpha = 0.5f))
+                            ) {
+                                Icon(Icons.Default.Edit, contentDescription = null, modifier = Modifier.size(13.dp))
+                                Spacer(modifier = Modifier.width(4.dp))
+                                Text("Nakit Değişti, Yeni Bakiye Gir", fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                            }
+                        } else {
+                            OutlinedTextField(
+                                value = inputStr,
+                                onValueChange = { inputStr = it },
+                                label = { Text("Güncel USDT Bakiyeniz", fontSize = 11.sp) },
+                                placeholder = { Text("Örn: 44.73 veya 100", fontSize = 11.sp) },
+                                modifier = Modifier.fillMaxWidth(),
+                                singleLine = true,
+                                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                                colors = OutlinedTextFieldDefaults.colors(
+                                    focusedBorderColor = IceCyanBright,
+                                    unfocusedBorderColor = ObsidianBorder,
+                                    focusedTextColor = Color.White,
+                                    unfocusedTextColor = Color.White
+                                )
+                            )
+
+                            // Quick adjustment chips
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.spacedBy(5.dp)
+                            ) {
+                                listOf(30.0, 44.73, 50.0, 100.0, 200.0).forEach { preset ->
+                                    Surface(
+                                        color = ObsidianCardElevated,
+                                        shape = RoundedCornerShape(6.dp),
+                                        border = BorderStroke(0.5.dp, ObsidianBorder),
+                                        modifier = Modifier
+                                            .weight(1f)
+                                            .clickable {
+                                                inputStr = if (preset % 1.0 == 0.0) preset.toInt().toString() else String.format(Locale.US, "%.2f", preset)
+                                            }
+                                    ) {
+                                        Text(
+                                            text = "$${if (preset % 1.0 == 0.0) preset.toInt().toString() else String.format(Locale.US, "%.2f", preset)}",
+                                            color = IceCyanBright,
+                                            fontSize = 10.5.sp,
+                                            fontWeight = FontWeight.Bold,
+                                            fontFamily = FontFamily.Monospace,
+                                            modifier = Modifier.padding(vertical = 4.dp),
+                                            textAlign = androidx.compose.ui.text.style.TextAlign.Center
+                                        )
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        },
+        confirmButton = {
+            if (isEditing) {
+                Button(
+                    onClick = {
+                        val parsed = parseFlexibleDouble(inputStr)
+                        if (parsed != null && parsed >= 0.0) {
+                            onUpdateCash(parsed)
+                            onDismiss()
+                        }
+                    },
+                    colors = ButtonDefaults.buttonColors(containerColor = EmeraldProfit, contentColor = Color.Black),
+                    shape = RoundedCornerShape(8.dp)
+                ) {
+                    Text("Kaydet & Başla", fontWeight = FontWeight.Bold, fontSize = 12.sp)
+                }
+            } else {
+                Button(
+                    onClick = onConfirmCurrent,
+                    colors = ButtonDefaults.buttonColors(containerColor = EmeraldProfit, contentColor = Color.Black),
+                    shape = RoundedCornerShape(8.dp)
+                ) {
+                    Text("✅ Evet, Aynen Devam", fontWeight = FontWeight.Bold, fontSize = 12.sp)
+                }
+            }
+        },
+        dismissButton = {
+            if (isEditing) {
+                TextButton(onClick = { isEditing = false }) {
+                    Text("Geri", color = TextSecondary)
+                }
+            }
+        }
+    )
+}
+
+/**
+ * Quick cash balance update dialog accessed directly from topbar or actions.
+ */
+@Composable
+fun QuickCashUpdateDialog(
+    currentCash: Double,
+    onDismiss: () -> Unit,
+    onConfirm: (Double) -> Unit
+) {
+    var inputStr by remember { mutableStateOf(if (currentCash > 0.0) String.format(Locale.US, "%.2f", currentCash) else "") }
+
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        containerColor = ObsidianCard,
+        shape = RoundedCornerShape(16.dp),
+        title = {
+            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                Icon(Icons.Default.AccountBalanceWallet, contentDescription = null, tint = IceCyanBright)
+                Text("Midas Kasa Bakiyesi Güncelle", color = TextPrimary, fontSize = 15.5.sp, fontWeight = FontWeight.Bold)
+            }
+        },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                Text("Midas Kripto cüzdanınızdaki güncel boş USDT miktarını girin:", color = TextSecondary, fontSize = 11.5.sp)
+                OutlinedTextField(
+                    value = inputStr,
+                    onValueChange = { inputStr = it },
+                    label = { Text("Kullanılabilir USDT", fontSize = 11.sp) },
+                    placeholder = { Text("Örn: 44.73", fontSize = 11.sp) },
+                    modifier = Modifier.fillMaxWidth(),
+                    singleLine = true,
+                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                    colors = OutlinedTextFieldDefaults.colors(
+                        focusedBorderColor = IceCyanBright,
+                        unfocusedBorderColor = ObsidianBorder,
+                        focusedTextColor = Color.White,
+                        unfocusedTextColor = Color.White
+                    )
+                )
+
+                // Quick preset chips
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(5.dp)
+                ) {
+                    listOf(30.0, 44.73, 50.0, 100.0, 200.0).forEach { preset ->
+                        Surface(
+                            color = ObsidianCardElevated,
+                            shape = RoundedCornerShape(6.dp),
+                            border = BorderStroke(0.5.dp, ObsidianBorder),
+                            modifier = Modifier
+                                .weight(1f)
+                                .clickable {
+                                    inputStr = if (preset % 1.0 == 0.0) preset.toInt().toString() else String.format(Locale.US, "%.2f", preset)
+                                }
+                        ) {
+                            Text(
+                                text = "$${if (preset % 1.0 == 0.0) preset.toInt().toString() else String.format(Locale.US, "%.2f", preset)}",
+                                color = IceCyanBright,
+                                fontSize = 10.5.sp,
+                                fontWeight = FontWeight.Bold,
+                                fontFamily = FontFamily.Monospace,
+                                modifier = Modifier.padding(vertical = 4.dp),
+                                textAlign = androidx.compose.ui.text.style.TextAlign.Center
+                            )
+                        }
+                    }
+                }
+            }
+        },
+        confirmButton = {
+            Button(
+                onClick = {
+                    val parsed = parseFlexibleDouble(inputStr)
+                    if (parsed != null && parsed >= 0.0) {
+                        onConfirm(parsed)
+                    }
+                },
+                colors = ButtonDefaults.buttonColors(containerColor = EmeraldProfit, contentColor = Color.Black),
+                shape = RoundedCornerShape(8.dp)
+            ) {
+                Text("Kaydet", fontWeight = FontWeight.Bold, fontSize = 12.sp)
+            }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss) {
+                Text("İptal", color = TextSecondary)
             }
         }
     )
@@ -1724,14 +2181,16 @@ fun CapitalAndPortfolioScreen(
     onUpdateMinThreshold: (Double) -> Unit,
     onRequestConfirmSale: (trade: AppTradeEntity, currentPrice: Double) -> Unit,
     onRequestUpdateTarget: (trade: AppTradeEntity, currentPrice: Double) -> Unit,
-    onDcaStep: (tradeId: Long, dcaPrice: Double, dcaAmount: Double) -> Unit
+    onDcaStep: (tradeId: Long, dcaPrice: Double, dcaAmount: Double) -> Unit,
+    onResetAllData: () -> Unit
 ) {
     val context = LocalContext.current
     var cashInput by remember { mutableStateOf("") }
     var isEditingCash by remember { mutableStateOf(false) }
 
-    val currentCash = capitalProfile?.availableCashUsdt ?: 100.0
-    val minThreshold = capitalProfile?.minSafeThresholdUsdt ?: 50.0
+    val isInitialized = capitalProfile?.isInitialized ?: false
+    val currentCash = capitalProfile?.availableCashUsdt ?: 0.0
+    val minThreshold = capitalProfile?.minSafeThresholdUsdt ?: 0.0
     val withdrawn = capitalProfile?.totalWithdrawnUsdt ?: 0.0
 
     LazyColumn(
@@ -2123,6 +2582,25 @@ fun CapitalAndPortfolioScreen(
                     }
                 }
             }
+        }
+
+        // RESET ALL DATA / FACTORY FRESH BUTTON
+        item {
+            Spacer(modifier = Modifier.height(8.dp))
+            OutlinedButton(
+                onClick = onResetAllData,
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(44.dp),
+                shape = RoundedCornerShape(10.dp),
+                colors = ButtonDefaults.outlinedButtonColors(contentColor = CoralRedBright),
+                border = BorderStroke(1.dp, CoralRed.copy(alpha = 0.5f))
+            ) {
+                Icon(Icons.Default.DeleteSweep, contentDescription = null, modifier = Modifier.size(16.dp), tint = CoralRedBright)
+                Spacer(modifier = Modifier.width(6.dp))
+                Text("🗑️ Tüm Verileri & Hafızayı Sıfırla (Fabrika Ayarları)", fontSize = 11.5.sp, fontWeight = FontWeight.Bold)
+            }
+            Spacer(modifier = Modifier.height(16.dp))
         }
     }
 }

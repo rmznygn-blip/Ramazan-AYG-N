@@ -38,16 +38,30 @@ object AiAdvisorEngine {
         oracleMap: Map<String, BinanceOracleData>,
         techMap: Map<String, TechnicalAnalysis5m>
     ): ActionGuidance {
-        val cash = capitalProfile?.availableCashUsdt ?: 100.0
-        val minThreshold = capitalProfile?.minSafeThresholdUsdt ?: 50.0
+        val isInitialized = capitalProfile?.isInitialized ?: false
+        val cash = capitalProfile?.availableCashUsdt ?: 0.0
+        val minThreshold = capitalProfile?.minSafeThresholdUsdt ?: 0.0
+
+        // 0. Case: Kasa Henüz Tanımlanmamışsa
+        if (!isInitialized) {
+            return ActionGuidance(
+                title = "💼 MİDAS KASANIZI TANIMLAYIN",
+                statusBadge = "İLK KURULUM BEKLENİYOR",
+                statusColorHex = 0xFF00F0FF,
+                step1 = "1. Midas Kripto cüzdanınızdaki güncel boş USDT miktarınızı yukarıdaki butondan veya açılış ekranından girin.",
+                step2 = "2. Sistem girdiğiniz gerçek nakde göre en fazla 3 kademeli bütçe planlaması yapacaktır.",
+                step3 = "3. Varsa mevcut aldığınız coinleri 'Mevcut Varlığımı Ekle' diyerek anında takibe alabilirsiniz.",
+                reasoning = "Sıfır varsayılan veya sahte bakiye tutulmaz; tamamen sizin girdiğiniz gerçek Midas USDT bakiyenizle çalışılır."
+            )
+        }
 
         // 1. Case: Kasa Güvenli Eşiğin Altındaysa
-        if (cash < minThreshold && activeTrades.isEmpty()) {
+        if (minThreshold > 0.0 && cash < minThreshold && activeTrades.isEmpty()) {
             return ActionGuidance(
                 title = "🛡️ KASA GÜVENLİK EŞİĞİ KORUMASI",
                 statusBadge = "KASA YETERSİZ ($${String.format(Locale.US, "%.1f", cash)} / $${String.format(Locale.US, "%.1f", minThreshold)} USDT)",
                 statusColorHex = 0xFFFFB800,
-                step1 = "1. Midas'taki kullanılabilir USDT kasanız ($${String.format(Locale.US, "%.2f", cash)}), belirlenen minimum güvenli eşiğin ($${String.format(Locale.US, "%.2f", minThreshold)}) altındadır.",
+                step1 = "1. Midas'taki kullanılabilir USDT kasanız ($${String.format(Locale.US, "%.2f", cash)}), belirlediğiniz minimum güvenli eşiğin ($${String.format(Locale.US, "%.2f", minThreshold)}) altındadır.",
                 step2 = "2. Midas komisyonlarının (%0.40) kâr marjını eritmemesi ve sağlıklı kâr elde edilebilmesi için yeni alım önerisi duraklatıldı.",
                 step3 = "3. Midas'a USD yatırıp USDT'ye dönüştürerek kasayı güncelleyin veya 'Kasa' sekmesinden güvenlik eşiğini düzenleyin.",
                 reasoning = "Sermaye koruma kuralı aktif. Düşük hacimli işlemler oransal komisyon yükünü artırır."
@@ -162,6 +176,42 @@ object AiAdvisorEngine {
     }
 
     /**
+     * Directly establishes the user's real initial Midas cash balance without calculating
+     * any fake withdrawals or prior discrepancies.
+     */
+    suspend fun setInitialCashBalance(
+        dao: AppDatabaseDao,
+        initialCashUsdt: Double,
+        minSafeThresholdUsdt: Double = 0.0
+    ): CapitalProfileEntity = withContext(Dispatchers.IO) {
+        val newProfile = CapitalProfileEntity(
+            id = 1,
+            isInitialized = true,
+            availableCashUsdt = initialCashUsdt,
+            minSafeThresholdUsdt = minSafeThresholdUsdt,
+            weeklyTargetPercent = 5.0,
+            weekStartCapitalUsdt = initialCashUsdt,
+            weekStartTimestamp = System.currentTimeMillis(),
+            totalWithdrawnUsdt = 0.0,
+            totalDepositedUsdt = initialCashUsdt,
+            lastRecordedBalanceUsdt = initialCashUsdt,
+            lastBalanceUpdateTimestamp = System.currentTimeMillis()
+        )
+        dao.saveCapitalProfile(newProfile)
+        newProfile
+    }
+
+    /**
+     * Completely resets all trades, memory, and capital profiles to absolute zero (factory fresh).
+     */
+    suspend fun resetAllDatabase(dao: AppDatabaseDao) = withContext(Dispatchers.IO) {
+        dao.clearAllTrades()
+        dao.clearCapitalProfile()
+        dao.clearWeeklyReports()
+        dao.clearCoinMemory()
+    }
+
+    /**
      * Smart Cash Auditor: Detects whether cash was withdrawn as USD to bank
      * or deposited without bothering the user.
      */
@@ -169,9 +219,12 @@ object AiAdvisorEngine {
         dao: AppDatabaseDao,
         newCashAmountUsdt: Double
     ): CapitalProfileEntity = withContext(Dispatchers.IO) {
-        val currentProfile = dao.getCapitalProfileOnce() ?: CapitalProfileEntity()
-        val prevObserved = currentProfile.availableCashUsdt
+        val currentProfile = dao.getCapitalProfileOnce()
+        if (currentProfile == null || !currentProfile.isInitialized) {
+            return@withContext setInitialCashBalance(dao, newCashAmountUsdt)
+        }
 
+        val prevObserved = currentProfile.availableCashUsdt
         var updatedWithdrawn = currentProfile.totalWithdrawnUsdt
         var updatedDeposited = currentProfile.totalDepositedUsdt
 
@@ -187,6 +240,7 @@ object AiAdvisorEngine {
         }
 
         val updatedProfile = currentProfile.copy(
+            isInitialized = true,
             availableCashUsdt = newCashAmountUsdt,
             totalWithdrawnUsdt = updatedWithdrawn,
             totalDepositedUsdt = updatedDeposited,

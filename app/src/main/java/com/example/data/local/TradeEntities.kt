@@ -35,14 +35,15 @@ data class AppTradeEntity(
 data class CapitalProfileEntity(
     @PrimaryKey
     val id: Int = 1,
-    val availableCashUsdt: Double = 100.0,
-    val minSafeThresholdUsdt: Double = 50.0,
+    val isInitialized: Boolean = false,
+    val availableCashUsdt: Double = 0.0,
+    val minSafeThresholdUsdt: Double = 0.0,
     val weeklyTargetPercent: Double = 5.0,
-    val weekStartCapitalUsdt: Double = 100.0,
+    val weekStartCapitalUsdt: Double = 0.0,
     val weekStartTimestamp: Long = System.currentTimeMillis(),
     val totalWithdrawnUsdt: Double = 0.0,
     val totalDepositedUsdt: Double = 0.0,
-    val lastRecordedBalanceUsdt: Double = 100.0,
+    val lastRecordedBalanceUsdt: Double = 0.0,
     val lastBalanceUpdateTimestamp: Long = System.currentTimeMillis()
 )
 
@@ -109,6 +110,9 @@ interface AppDatabaseDao {
     @Query("DELETE FROM app_trades WHERE id = :id")
     suspend fun deleteTradeById(id: Long)
 
+    @Query("DELETE FROM app_trades")
+    suspend fun clearAllTrades()
+
     // Capital Profile Operations
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun saveCapitalProfile(profile: CapitalProfileEntity)
@@ -119,12 +123,18 @@ interface AppDatabaseDao {
     @Query("SELECT * FROM capital_profile WHERE id = 1 LIMIT 1")
     suspend fun getCapitalProfileOnce(): CapitalProfileEntity?
 
+    @Query("DELETE FROM capital_profile")
+    suspend fun clearCapitalProfile()
+
     // Weekly Reports Operations
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun insertWeeklyReport(report: WeeklyReportEntity): Long
 
     @Query("SELECT * FROM weekly_reports ORDER BY createdAt DESC")
     fun getAllWeeklyReportsFlow(): Flow<List<WeeklyReportEntity>>
+
+    @Query("DELETE FROM weekly_reports")
+    suspend fun clearWeeklyReports()
 
     // Coin Memory Metrics
     @Insert(onConflict = OnConflictStrategy.REPLACE)
@@ -138,4 +148,7 @@ interface AppDatabaseDao {
 
     @Query("SELECT * FROM coin_memory_metrics ORDER BY totalNetProfitUsdt DESC")
     suspend fun getAllCoinMemoriesOnce(): List<CoinMemoryEntity>
+
+    @Query("DELETE FROM coin_memory_metrics")
+    suspend fun clearCoinMemory()
 }
