@@ -592,6 +592,28 @@ fun CryptoAnalystMasterApp() {
                 )
             }
 
+            // 4. DIALOG: UPDATE TARGET EXIT PRICE
+            tradeToUpdateTarget?.let { (trade, currentMarketPrice) ->
+                UpdateTargetDialog(
+                    trade = trade,
+                    currentMarketPrice = currentMarketPrice,
+                    onDismiss = { tradeToUpdateTarget = null },
+                    onConfirm = { newTargetPrice ->
+                        coroutineScope.launch {
+                            val updated = AiAdvisorEngine.updateTradeTarget(dao, trade.id, newTargetPrice)
+                            if (updated != null) {
+                                Toast.makeText(
+                                    context,
+                                    "🎯 ${trade.symbol} Yeni Satış Hedefi: $${String.format(Locale.US, if (newTargetPrice < 1.0) "%.4f" else "%.2f", newTargetPrice)} USDT",
+                                    Toast.LENGTH_SHORT
+                                ).show()
+                            }
+                            tradeToUpdateTarget = null
+                        }
+                    }
+                )
+            }
+
             // 5. DIALOG: INITIAL SETUP (IF UNINITIALIZED) OR STARTUP CASH CHECK
             val isInitialized = capitalProfile?.isInitialized == true
 
