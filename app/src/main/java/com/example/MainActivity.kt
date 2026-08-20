@@ -364,9 +364,9 @@ fun CryptoAnalystMasterApp() {
                 AddExistingHoldingDialog(
                     assets = cryptoAssets,
                     onDismiss = { showAddExistingHoldingDialog = false },
-                    onConfirm = { symbol, entryPrice, investedUsdt, dcaLevel, netProfitTargetPct ->
+                    onConfirm = { symbol, entryPrice, coinAmount, dcaLevel, netProfitTargetPct ->
                         coroutineScope.launch {
-                            val coinAmount = if (entryPrice > 0) (investedUsdt * 0.998) / entryPrice else 0.0
+                            val investedUsdt = entryPrice * coinAmount
                             val targetExitPrice = entryPrice * (1.0 + (netProfitTargetPct + 0.40) / 100.0)
                             val newTrade = AppTradeEntity(
                                 symbol = symbol.uppercase(),
@@ -382,7 +382,7 @@ fun CryptoAnalystMasterApp() {
                                 openedAt = System.currentTimeMillis()
                             )
                             dao.insertTrade(newTrade)
-                            Toast.makeText(context, "✅ ${symbol.uppercase()} Portföye Eklendi! Asistan takibe başladı.", Toast.LENGTH_SHORT).show()
+                            Toast.makeText(context, "✅ ${symbol.uppercase()} Portföye Eklendi! (${String.format(Locale.US, "%.6f", coinAmount).trimEnd('0').trimEnd('.')} Adet)", Toast.LENGTH_SHORT).show()
                             showAddExistingHoldingDialog = false
                         }
                     }
@@ -504,19 +504,20 @@ fun CryptoAnalystMasterApp() {
 
 /**
  * Dialog to add existing crypto holding currently sitting in user's Midas portfolio.
+ * Accurately parses user's Midas average cost (Ort. Fiyat) and amount (Adet) directly from Midas UI.
  */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun AddExistingHoldingDialog(
     assets: List<CryptoAsset>,
     onDismiss: () -> Unit,
-    onConfirm: (symbol: String, entryPrice: Double, investedUsdt: Double, dcaLevel: Int, targetProfitPct: Double) -> Unit
+    onConfirm: (symbol: String, entryPrice: Double, coinAmount: Double, dcaLevel: Int, targetProfitPct: Double) -> Unit
 ) {
     val quickSymbols = listOf("SOL", "BTC", "ETH", "AVAX", "XRP", "DOGE", "PEPE", "SUI", "BNB", "NEAR")
-    var selectedSymbol by remember { mutableStateOf("SOL") }
+    var selectedSymbol by remember { mutableStateOf("BTC") }
     var customSymbol by remember { mutableStateOf("") }
     var entryPriceStr by remember { mutableStateOf("") }
-    var investedUsdtStr by remember { mutableStateOf("") }
+    var coinAmountStr by remember { mutableStateOf("") }
     var dcaLevel by remember { mutableIntStateOf(1) }
     var targetProfitPctStr by remember { mutableStateOf("2.0") }
 
@@ -530,10 +531,42 @@ fun AddExistingHoldingDialog(
         }
     }
 
-    val entryPrice = entryPriceStr.toDoubleOrNull() ?: 0.0
-    val investedUsdt = investedUsdtStr.toDoubleOrNull() ?: 0.0
-    val targetProfitPct = targetProfitPctStr.toDoubleOrNull() ?: 2.0
+    // Helper to safely parse Turkish formatted numbers (e.g., "64.681,22" -> 64681.22, "0,0001992" -> 0.0001992)
+    fun parseNumberInput(input: String): Double {
+        val clean = input.trim()
+        if (clean.isEmpty()) return 0.0
+        return try {
+            if (clean.contains(".") && clean.contains(",")) {
+                if (clean.lastIndexOf(",") > clean.lastIndexOf(".")) {
+                    // e.g. "64.681,22" -> remove '.' and replace ',' with '.'
+                    clean.replace(".", "").replace(",", ".").toDouble()
+                } else {
+                    // e.g. "64,681.22" -> remove ','
+                    clean.replace(",", "").toDouble()
+                }
+            } else if (clean.contains(",")) {
+                // e.g. "0,0001992" or "64681,22" -> replace ',' with '.'
+                clean.replace(",", ".").toDouble()
+            } else {
+                clean.toDouble()
+            }
+        } catch (e: Exception) {
+            0.0
+        }
+    }
+
+    val entryPrice = parseNumberInput(entryPriceStr)
+    val coinAmount = parseNumberInput(coinAmountStr)
+    val targetProfitPct = parseNumberInput(targetProfitPctStr).takeIf { it > 0.0 } ?: 2.0
+
+    // Calculations matching Midas
+    val matchingAsset = assets.firstOrNull { it.symbol.equals(resolvedSymbol, ignoreCase = true) }
+    val currentMarketPrice = if (matchingAsset != null && matchingAsset.rawPrice > 0) matchingAsset.rawPrice else entryPrice
+    val totalInvestedUsdt = entryPrice * coinAmount
+    val currentMarketValueUsdt = currentMarketPrice * coinAmount
     val calculatedTargetExit = if (entryPrice > 0) entryPrice * (1.0 + (targetProfitPct + 0.40) / 100.0) else 0.0
+    val targetTotalReturnUsdt = calculatedTargetExit * coinAmount * 0.998 // after Midas exit fee
+    val estimatedNetProfitUsdt = (targetTotalReturnUsdt - totalInvestedUsdt).coerceAtLeast(0.0)
 
     AlertDialog(
         onDismissRequest = onDismiss,
@@ -556,7 +589,7 @@ fun AddExistingHoldingDialog(
                 verticalArrangement = Arrangement.spacedBy(10.dp)
             ) {
                 Text(
-                    text = "Midas Kripto'da şu an elinizde bulunan varlığı girin. Asistan anlık olarak SAT / BEKLE kararı üretip karlı limit çıkışınızı yönetsin:",
+                    text = "Midas ekranınızdaki Ort. Fiyat ve Adet bilgilerini girin. Asistan anlık olarak SAT / BEKLE kararı ve kârlı limit çıkışınızı yönetsin:",
                     color = TextSecondary,
                     fontSize = 11.5.sp
                 )
@@ -609,11 +642,12 @@ fun AddExistingHoldingDialog(
                     )
                 )
 
-                // Entry / Purchase Price
+                // 1. Ort. Fiyat / Maliyet
                 OutlinedTextField(
                     value = entryPriceStr,
                     onValueChange = { entryPriceStr = it },
-                    label = { Text("Alış / Maliyet Fiyatınız ($)", fontSize = 11.sp) },
+                    label = { Text("Midas Ort. Fiyat / Maliyetiniz ($)", fontSize = 11.sp) },
+                    placeholder = { Text("Örn: 64681.22 veya 64.681,22", fontSize = 11.sp) },
                     modifier = Modifier.fillMaxWidth(),
                     singleLine = true,
                     keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
@@ -625,12 +659,12 @@ fun AddExistingHoldingDialog(
                     )
                 )
 
-                // Total Invested USDT
+                // 2. Midas'taki Varlık Miktarı (ADET)
                 OutlinedTextField(
-                    value = investedUsdtStr,
-                    onValueChange = { investedUsdtStr = it },
-                    label = { Text("Yatırdığınız Tutar (USDT / $)", fontSize = 11.sp) },
-                    placeholder = { Text("Örn: 25.0", fontSize = 11.sp) },
+                    value = coinAmountStr,
+                    onValueChange = { coinAmountStr = it },
+                    label = { Text("Midas'taki Varlık Miktarı (Adet)", fontSize = 11.sp, fontWeight = FontWeight.Bold) },
+                    placeholder = { Text("Örn: 0.0001992 veya 1.5", fontSize = 11.sp) },
                     modifier = Modifier.fillMaxWidth(),
                     singleLine = true,
                     keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
@@ -670,27 +704,44 @@ fun AddExistingHoldingDialog(
                     }
                 }
 
-                // Calculated Target Preview
-                if (entryPrice > 0) {
+                // Live calculations & Midas target preview
+                if (entryPrice > 0 && coinAmount > 0) {
                     Surface(
                         color = ObsidianBg,
                         shape = RoundedCornerShape(8.dp),
-                        border = BorderStroke(0.6.dp, ObsidianBorder),
+                        border = BorderStroke(0.6.dp, EmeraldProfit.copy(alpha = 0.5f)),
                         modifier = Modifier.fillMaxWidth()
                     ) {
-                        Column(modifier = Modifier.padding(8.dp), verticalArrangement = Arrangement.spacedBy(2.dp)) {
-                            Text(
-                                text = "🎯 Hedef Çıkış: $${String.format(Locale.US, if (calculatedTargetExit < 1.0) "%.4f" else "%.2f", calculatedTargetExit)}",
-                                color = EmeraldProfitBright,
-                                fontSize = 11.sp,
-                                fontWeight = FontWeight.Bold,
-                                fontFamily = FontFamily.Monospace
-                            )
-                            Text(
-                                text = "(Net +%${String.format(Locale.US, "%.1f", targetProfitPct)} kâr + Midas %0.40 komisyonu dahildir)",
-                                color = TextSecondary,
-                                fontSize = 9.5.sp
-                            )
+                        Column(modifier = Modifier.padding(10.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.SpaceBetween
+                            ) {
+                                Text("Toplam Yatırılan Tutar:", color = TextTertiary, fontSize = 10.5.sp)
+                                Text("$${String.format(Locale.US, "%.2f", totalInvestedUsdt)} USDT", color = TextPrimary, fontSize = 10.5.sp, fontWeight = FontWeight.Bold)
+                            }
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.SpaceBetween
+                            ) {
+                                Text("Mevcut Anlık Değer:", color = TextTertiary, fontSize = 10.5.sp)
+                                Text("$${String.format(Locale.US, "%.2f", currentMarketValueUsdt)} USDT", color = IceCyanBright, fontSize = 10.5.sp, fontWeight = FontWeight.Bold)
+                            }
+                            HorizontalDivider(color = ObsidianBorder, thickness = 0.5.dp, modifier = Modifier.padding(vertical = 2.dp))
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.SpaceBetween
+                            ) {
+                                Text("🎯 Midas Satış Emri:", color = EmeraldProfitBright, fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                                Text("$${String.format(Locale.US, if (calculatedTargetExit < 1.0) "%.4f" else "%.2f", calculatedTargetExit)}", color = EmeraldProfitBright, fontSize = 11.sp, fontWeight = FontWeight.Bold, fontFamily = FontFamily.Monospace)
+                            }
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.SpaceBetween
+                            ) {
+                                Text("🎯 Satışta Geçecek Tutar:", color = TextSecondary, fontSize = 10.sp)
+                                Text("~$${String.format(Locale.US, "%.2f", targetTotalReturnUsdt)} USDT (+%${String.format(Locale.US, "%.1f", targetProfitPct)} net)", color = EmeraldProfit, fontSize = 10.sp, fontWeight = FontWeight.Bold)
+                            }
                         }
                     }
                 }
@@ -699,11 +750,11 @@ fun AddExistingHoldingDialog(
         confirmButton = {
             Button(
                 onClick = {
-                    if (resolvedSymbol.isNotBlank() && entryPrice > 0 && investedUsdt > 0) {
-                        onConfirm(resolvedSymbol, entryPrice, investedUsdt, dcaLevel, targetProfitPct)
+                    if (resolvedSymbol.isNotBlank() && entryPrice > 0 && coinAmount > 0) {
+                        onConfirm(resolvedSymbol, entryPrice, coinAmount, dcaLevel, targetProfitPct)
                     }
                 },
-                enabled = resolvedSymbol.isNotBlank() && entryPrice > 0 && investedUsdt > 0,
+                enabled = resolvedSymbol.isNotBlank() && entryPrice > 0 && coinAmount > 0,
                 colors = ButtonDefaults.buttonColors(containerColor = EmeraldProfit, contentColor = Color.Black),
                 shape = RoundedCornerShape(8.dp)
             ) {
