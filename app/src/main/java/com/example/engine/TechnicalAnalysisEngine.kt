@@ -1,171 +1,154 @@
 package com.example.engine
 
 import com.example.model.CandleStick
+import com.example.model.OrderBookDepth
 import com.example.model.TechnicalAnalysis5m
 import java.util.Locale
+import kotlin.math.abs
 import kotlin.math.max
 import kotlin.math.min
 import kotlin.math.pow
 import kotlin.math.sqrt
 
+/**
+ * Quantitative Algorithmic Analysis Core
+ * Strictly enforces:
+ * - Single-source Binance OHLCV
+ * - Z-Score < -2.5 dip filter
+ * - Volume Shock (3x dump) knife catch protection
+ * - Order book internal sentiment (< 60% buyer wall fear filter)
+ * - Dynamic ATR-scaled 1:2:4 DCA Tiers
+ */
 object TechnicalAnalysisEngine {
 
-    /**
-     * Performs institutional grade 5-minute technical indicator & support/resistance analysis.
-     */
-    fun analyze5mCandles(
+    fun analyzeCandles(
         symbol: String,
-        candles: List<CandleStick>,
-        leadLagSpreadPercent: Double = 0.0
-    ): TechnicalAnalysis5m {
-        if (candles.size < 15) {
-            val fallbackPrice = candles.lastOrNull()?.close ?: 100.0
-            return TechnicalAnalysis5m(
-                symbol = symbol,
-                currentPrice = fallbackPrice,
-                supportLevel = fallbackPrice * 0.985,
-                resistanceLevel = fallbackPrice * 1.015,
-                distanceToSupportPercent = 1.5,
-                rsi14 = 50.0,
-                ema9 = fallbackPrice,
-                ema21 = fallbackPrice,
-                ema50 = fallbackPrice,
-                bollingerLower = fallbackPrice * 0.98,
-                bollingerUpper = fallbackPrice * 1.02,
-                bollingerMiddle = fallbackPrice,
-                candlePattern = "Yükleniyor...",
-                volumeRatioToAvg = 1.0,
-                confluenceScore = 50,
-                isSupportBounceValid = false,
-                isOverboughtRisk = false,
-                recommendation = "Analiz Bekleniyor"
-            )
-        }
+        candles5m: List<CandleStick>,
+        candles3m: List<CandleStick> = emptyList(),
+        orderBook: OrderBookDepth? = null
+    ): TechnicalAnalysis5m? {
+        if (candles5m.size < 20) return null
 
-        val closes = candles.map { it.close }
-        val currentPrice = closes.last()
-        val latestCandle = candles.last()
-        val previousCandle = candles[candles.size - 2]
+        val closes = candles5m.map { it.close }
+        val highs = candles5m.map { it.high }
+        val lows = candles5m.map { it.low }
+        val volumes = candles5m.map { it.volume }
 
-        // 1. Support & Resistance (Pivot Price Action on 5m)
-        val recentLows = candles.takeLast(15).map { it.low }
-        val recentHighs = candles.takeLast(15).map { it.high }
-        val swingLowSupport = recentLows.minOrNull() ?: (currentPrice * 0.985)
-        val swingHighResistance = recentHighs.maxOrNull() ?: (currentPrice * 1.015)
+        val latestCandle = candles5m.last()
+        val currentPrice = latestCandle.close
 
-        // 2. Exponential Moving Averages (EMA 9, EMA 21, EMA 50)
+        // 1. EMAs (9, 21, 50)
         val ema9 = calculateEMA(closes, 9)
         val ema21 = calculateEMA(closes, 21)
-        val ema50 = calculateEMA(closes, min(50, closes.size))
+        val ema50 = calculateEMA(closes, 50)
 
-        // 3. Bollinger Bands (20 periods, 2.0 stddev)
-        val bbPeriod = min(20, closes.size)
-        val bbSlice = closes.takeLast(bbPeriod)
-        val bbMiddle = bbSlice.average()
-        val variance = bbSlice.map { (it - bbMiddle).pow(2) }.average()
-        val stdDev = sqrt(variance)
-        val bbUpper = bbMiddle + (2.0 * stdDev)
-        val bbLower = bbMiddle - (2.0 * stdDev)
+        // 2. Bollinger Bands (20 periods, 2.0 std dev)
+        val period = 20
+        val last20Closes = closes.takeLast(period)
+        val sma20 = last20Closes.average()
+        val variance = last20Closes.map { (it - sma20).pow(2.0) }.average()
+        val stdDev = sqrt(variance).coerceAtLeast(0.0000001)
 
-        // Refined dynamic support is the higher of swing low or Bollinger Lower Band
-        val dynamicSupport = max(swingLowSupport, bbLower * 0.998)
-        val dynamicResistance = min(swingHighResistance, bbUpper * 1.002)
+        val bbUpper = sma20 + (2.0 * stdDev)
+        val bbLower = sma20 - (2.0 * stdDev)
+        val bbMiddle = sma20
+        val bbBandwidthPercent = if (bbMiddle > 0) ((bbUpper - bbLower) / bbMiddle) * 100.0 else 0.0
 
-        val distanceToSupportPct = if (currentPrice > dynamicSupport) {
-            ((currentPrice - dynamicSupport) / currentPrice) * 100.0
-        } else {
-            0.0
-        }
+        // 3. Z-Score Deviation (Statistical quant indicator)
+        val zScore = (currentPrice - sma20) / stdDev
+        val isZScoreDip = zScore < -2.5
+        val isPriceBelowBollingerLower = currentPrice <= bbLower
 
-        // 4. RSI (14 periods on 5m)
+        // 4. ATR (14 Periods - Dynamic Volatility Engine)
+        val atr14 = calculateATR(candles5m, 14).coerceAtLeast(currentPrice * 0.003)
+
+        // 5. RSI 14 (5-minute and 3-minute)
         val rsi14 = calculateRSI(closes, 14)
+        val rsi3m = if (candles3m.size >= 14) {
+            calculateRSI(candles3m.map { it.close }, 14)
+        } else rsi14
 
-        // 5. Volume Spike & Volume Profile Node (Point of Control)
-        val volumes = candles.map { it.volume }
-        val avgVolume = volumes.takeLast(15).average().coerceAtLeast(1.0)
+        // 6. Volume Shock Filter (3x average sell dump protection)
+        val avgVolume = volumes.takeLast(20).average().coerceAtLeast(1.0)
         val volumeRatio = latestCandle.volume / avgVolume
+        val isRedCandle = latestCandle.close < latestCandle.open
+        val isVolumeShock = volumeRatio >= 3.0 && isRedCandle
+        val volumeShockMessage = if (isVolumeShock) {
+            "⚠️ Düşen bıçağı tutma, satış hacmi ortalamanın ${String.format(Locale.US, "%.1f", volumeRatio)}x katı! Hacmin sakinleşmesi bekleniyor."
+        } else ""
 
-        // Find the candle with highest volume in the last 20 candles (Institutional Accumulation Node)
-        val recentCandles = candles.takeLast(min(20, candles.size))
+        // 7. Dynamic Support and Resistance
+        val swingLow = lows.takeLast(15).minOrNull() ?: currentPrice
+        val dynamicSupport = min(bbLower, min(ema50, swingLow))
+        val swingHigh = highs.takeLast(15).maxOrNull() ?: currentPrice
+        val dynamicResistance = max(bbUpper, max(ema9, swingHigh))
+
+        val distanceToSupport = if (currentPrice > 0) ((currentPrice - dynamicSupport) / currentPrice) * 100.0 else 0.0
+
+        // 8. Order Book Depth & Internal Sentiment Filter
+        val currentOrderBook = orderBook ?: OrderBookDepth(symbol = symbol)
+        val isOrderBookFear = currentOrderBook.bidRatio < 0.60
+
+        // 9. Institutional Volume Profile Node (Point of Control)
+        val recentCandles = candles5m.takeLast(min(20, candles5m.size))
         val highestVolumeCandle = recentCandles.maxByOrNull { it.volume } ?: latestCandle
         val volumeNodePrice = (highestVolumeCandle.open + highestVolumeCandle.close + highestVolumeCandle.low + highestVolumeCandle.high) / 4.0
         val volNodeRatio = if (avgVolume > 0) (highestVolumeCandle.volume / avgVolume) * 100.0 else 100.0
-        val volumeClusterDescription = "Son saatlerde en yoğun alım kümelenmesi $${String.format(Locale.US, if (volumeNodePrice < 1.0) "%.4f" else "%.2f", volumeNodePrice)} seviyesinde gerçekleşti (Hacim: %${String.format(Locale.US, "%.0f", volNodeRatio)})"
+        val volumeClusterDescription = "En yoğun alım kümelenmesi $${String.format(Locale.US, if (volumeNodePrice < 1.0) "%.4f" else "%.2f", volumeNodePrice)} (Hacim: %${String.format(Locale.US, "%.0f", volNodeRatio)})"
 
-        // 3-Tier DCA Zones:
-        // Tier 1: Dynamic support / volume node
-        // Tier 2: 2.5% below Tier 1
-        // Tier 3: 5.0% below Tier 1 (Final institutional defense)
+        // 10. Dynamic ATR-Scaled 1:2:4 DCA Plan
+        // Tier 1: Entry limit near dynamic support
+        // Tier 2: 1.5 * ATR below Tier 1
+        // Tier 3: 3.0 * ATR below Tier 1
         val dcaTier1Price = dynamicSupport
-        val dcaTier2Price = dynamicSupport * 0.975
-        val dcaTier3Price = dynamicSupport * 0.950
+        val dcaTier2Price = (dynamicSupport - (1.5 * atr14)).coerceAtLeast(dynamicSupport * 0.90)
+        val dcaTier3Price = (dynamicSupport - (3.0 * atr14)).coerceAtLeast(dynamicSupport * 0.85)
 
-        // 6. Candlestick Pattern Recognition on 5m
-        val bodySize = Math.abs(latestCandle.close - latestCandle.open)
+        // 11. Candlestick Pattern Recognition on 5m
+        val bodySize = abs(latestCandle.close - latestCandle.open)
         val lowerWick = min(latestCandle.open, latestCandle.close) - latestCandle.low
         val upperWick = latestCandle.high - max(latestCandle.open, latestCandle.close)
-        val isBullish = latestCandle.close >= latestCandle.open
 
-        var candlePattern = "Nötr Mum"
-        if (lowerWick >= 2.0 * bodySize && lowerWick > upperWick) {
-            candlePattern = "Boğa Çekiç (Dip Sekmesi 🔨)"
-        } else if (isBullish && previousCandle.close < previousCandle.open &&
-            latestCandle.close > previousCandle.open && latestCandle.open < previousCandle.close
-        ) {
-            candlePattern = "Yutan Boğa (Bullish Engulfing 🚀)"
-        } else if (distanceToSupportPct <= 0.45) {
-            candlePattern = "Destek Seviyesi Test Ediliyor 🛡️"
+        val candlePattern = when {
+            lowerWick >= 2.0 * bodySize && bodySize > 0 -> "Boğa Çekiç (Bullish Hammer - Dip Alıcı Girişi)"
+            latestCandle.close > latestCandle.open && latestCandle.close > ema21 -> "EMA21 Üzeri Boğa İtme Mumu"
+            distanceToSupport <= 0.35 -> "Destek Testi & Taban Kümelenmesi"
+            isZScoreDip -> "Ekstrem Z-Score İstatistiki Dip (-2.5σ)"
+            else -> "Konsolidasyon / Nötr Akış"
         }
 
-        // 7. Institutional Confluence Score (0 - 100)
-        var score = 0
+        // 12. Multi-Factor Institutional Confluence Score (0 - 100)
+        var score = 50
 
-        // Factor A: Proximity to 5m Technical Support (0 - 30 pts)
-        if (distanceToSupportPct <= 0.50) {
-            score += 30 // Right at support!
-        } else if (distanceToSupportPct <= 1.0) {
-            score += 20
-        } else if (distanceToSupportPct <= 1.8) {
-            score += 10
-        }
+        // RSI conditions (< 30 is strong oversold)
+        if (rsi14 <= 30.0) score += 20 else if (rsi14 <= 38.0) score += 10
+        if (rsi3m <= 30.0) score += 5
 
-        // Factor B: RSI Condition (0 - 25 pts)
-        if (rsi14 in 25.0..45.0) {
-            score += 25 // Prime accumulation zone
-        } else if (rsi14 in 45.0..55.0) {
-            score += 15
-        } else if (rsi14 > 65.0) {
-            score -= 15 // Overbought penalty!
-        }
+        // Bollinger & Z-Score conditions
+        if (isZScoreDip) score += 15
+        if (isPriceBelowBollingerLower) score += 10
 
-        // Factor C: Binance Lead-Lag Arbitrage Spread (0 - 25 pts)
-        if (leadLagSpreadPercent >= 0.60) {
-            score += 25
-        } else if (leadLagSpreadPercent >= 0.35) {
-            score += 18
-        } else if (leadLagSpreadPercent >= 0.15) {
-            score += 10
-        }
+        // Order Book conditions (> 60% buyer wall)
+        if (currentOrderBook.bidRatio >= 0.65) score += 10
+        else if (isOrderBookFear) score -= 25 // Penalize if seller pressure dominates
 
-        // Factor D: EMA & Volume Confirmation (0 - 20 pts)
-        if (currentPrice >= ema9 && ema9 >= ema21) {
-            score += 10 // Bullish micro-trend
-        } else if (currentPrice >= dynamicSupport && volumeRatio > 1.1) {
-            score += 10 // Support with volume
-        }
-        if (volumeRatio >= 1.25) {
-            score += 10
-        }
+        // Volume shock penalty
+        if (isVolumeShock) score -= 35 // Hold off knife catch
+
+        // Distance to support
+        if (distanceToSupport <= 0.40) score += 10
 
         val finalScore = score.coerceIn(0, 100)
-        val isSupportBounceValid = distanceToSupportPct <= 0.85 && rsi14 <= 58.0 && finalScore >= 70
-        val isOverboughtRisk = rsi14 >= 65.0 || (currentPrice >= dynamicResistance * 0.996)
+        val isSupportBounceValid = (rsi14 <= 35.0 || isZScoreDip || distanceToSupport <= 0.40) && !isVolumeShock && !isOrderBookFear
+        val isOverboughtRisk = rsi14 >= 68.0 || currentPrice >= bbUpper
 
         val recommendation = when {
-            finalScore >= 80 -> "🔥 GÜÇLÜ 5DK DESTEK ALIMI (%$finalScore)"
-            finalScore >= 68 -> "⚡ UYGUN MİKRO GİRİŞ (%$finalScore)"
-            isOverboughtRisk -> "⚠️ DİRENÇ / AŞIRI ALIM (BEKLE)"
-            else -> "⏳ 5DK DESTEĞE YAKLAŞMASI BEKLENİYOR"
+            isVolumeShock -> "⚠️ BEKLE (HACİMLİ SATIŞ ŞOKU - BIÇAĞI TUTMA)"
+            isOrderBookFear -> "⚠️ BEKLE (TAHTADA ALICI DUVARI <%60 - BASKI VAR)"
+            finalScore >= 75 -> "🎯 GÜÇLÜ PUSU GİRİŞİ (RSI+BB+Z-SCORE ONAYLI)"
+            finalScore >= 60 -> "🟢 KADEMELİ PUSU ALIMI UYGUN"
+            isOverboughtRisk -> "🔴 DİRENÇ / KÂR AL BÖLGESİ"
+            else -> "⏳ BEKLE (PİSAYADA NET DİP HENÜZ OLUŞMADI)"
         }
 
         return TechnicalAnalysis5m(
@@ -174,14 +157,23 @@ object TechnicalAnalysisEngine {
             currentPrice = currentPrice,
             supportLevel = dynamicSupport,
             resistanceLevel = dynamicResistance,
-            distanceToSupportPercent = distanceToSupportPct,
+            distanceToSupportPercent = distanceToSupport,
             rsi14 = rsi14,
+            rsi3m = rsi3m,
             ema9 = ema9,
             ema21 = ema21,
             ema50 = ema50,
             bollingerLower = bbLower,
             bollingerUpper = bbUpper,
             bollingerMiddle = bbMiddle,
+            bollingerBandwidthPercent = bbBandwidthPercent,
+            atr14 = atr14,
+            zScore = zScore,
+            isZScoreDip = isZScoreDip,
+            isPriceBelowBollingerLower = isPriceBelowBollingerLower,
+            isVolumeShock = isVolumeShock,
+            volumeShockMessage = volumeShockMessage,
+            orderBookDepth = currentOrderBook,
             candlePattern = candlePattern,
             volumeRatioToAvg = volumeRatio,
             volumeNodePrice = volumeNodePrice,
@@ -193,41 +185,41 @@ object TechnicalAnalysisEngine {
             recommendation = recommendation,
             dcaTier1Price = dcaTier1Price,
             dcaTier2Price = dcaTier2Price,
-            dcaTier3Price = dcaTier3Price
+            dcaTier3Price = dcaTier3Price,
+            dcaTier1Weight = 1.0, // $15
+            dcaTier2Weight = 2.0, // $30
+            dcaTier3Weight = 4.0, // $60
+            lastUpdated = System.currentTimeMillis()
         )
     }
 
-    private fun calculateEMA(prices: List<Double>, period: Int): Double {
-        if (prices.isEmpty()) return 0.0
-        if (prices.size < period) return prices.average()
-
-        val multiplier = 2.0 / (period + 1)
-        var ema = prices.take(period).average()
-
-        for (i in period until prices.size) {
-            ema = (prices[i] - ema) * multiplier + ema
+    private fun calculateEMA(values: List<Double>, period: Int): Double {
+        if (values.isEmpty()) return 0.0
+        val k = 2.0 / (period + 1.0)
+        var ema = values.take(period).average()
+        for (i in period until values.size) {
+            ema = (values[i] * k) + (ema * (1 - k))
         }
         return ema
     }
 
-    private fun calculateRSI(prices: List<Double>, period: Int = 14): Double {
-        if (prices.size <= period) return 50.0
-
+    private fun calculateRSI(closes: List<Double>, period: Int = 14): Double {
+        if (closes.size < period + 1) return 50.0
         var gains = 0.0
         var losses = 0.0
 
         for (i in 1..period) {
-            val change = prices[i] - prices[i - 1]
-            if (change > 0) gains += change else losses += Math.abs(change)
+            val diff = closes[i] - closes[i - 1]
+            if (diff >= 0) gains += diff else losses += -diff
         }
 
         var avgGain = gains / period
         var avgLoss = losses / period
 
-        for (i in (period + 1) until prices.size) {
-            val change = prices[i] - prices[i - 1]
-            val gain = if (change > 0) change else 0.0
-            val loss = if (change < 0) Math.abs(change) else 0.0
+        for (i in (period + 1) until closes.size) {
+            val diff = closes[i] - closes[i - 1]
+            val gain = if (diff > 0) diff else 0.0
+            val loss = if (diff < 0) -diff else 0.0
 
             avgGain = (avgGain * (period - 1) + gain) / period
             avgLoss = (avgLoss * (period - 1) + loss) / period
@@ -235,6 +227,26 @@ object TechnicalAnalysisEngine {
 
         if (avgLoss == 0.0) return 100.0
         val rs = avgGain / avgLoss
-        return (100.0 - (100.0 / (1.0 + rs))).coerceIn(0.0, 100.0)
+        return 100.0 - (100.0 / (1.0 + rs))
+    }
+
+    private fun calculateATR(candles: List<CandleStick>, period: Int = 14): Double {
+        if (candles.size < period + 1) return 0.0
+        val trList = mutableListOf<Double>()
+
+        for (i in 1 until candles.size) {
+            val high = candles[i].high
+            val low = candles[i].low
+            val prevClose = candles[i - 1].close
+            val tr = max(high - low, max(abs(high - prevClose), abs(low - prevClose)))
+            trList.add(tr)
+        }
+
+        if (trList.isEmpty()) return 0.0
+        var atr = trList.take(period).average()
+        for (i in period until trList.size) {
+            atr = (atr * (period - 1) + trList[i]) / period
+        }
+        return atr
     }
 }

@@ -1611,52 +1611,82 @@ fun LiveAssistantScreen(
                 shape = RoundedCornerShape(12.dp),
                 border = BorderStroke(1.dp, if (isRefreshing) EmeraldProfit else ObsidianBorder)
             ) {
-                Row(
-                    modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp),
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                        Box(
-                            modifier = Modifier
-                                .size(8.dp)
-                                .clip(CircleShape)
-                                .background(if (isRefreshing) EmeraldProfitBright else EmeraldProfit)
-                        )
-                        Column {
-                            Text(
-                                text = "CANLI BİNANCE & MİDAS VERİSİ",
-                                color = TextPrimary,
-                                fontSize = 11.sp,
-                                fontWeight = FontWeight.ExtraBold,
-                                fontFamily = FontFamily.Monospace
+                Column(modifier = Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                            Box(
+                                modifier = Modifier
+                                    .size(9.dp)
+                                    .clip(CircleShape)
+                                    .background(if (isRefreshing) EmeraldProfitBright else EmeraldProfit)
                             )
-                            Text(
-                                text = "Son Güncelleme: ${SimpleDateFormat("HH:mm:ss", Locale.getDefault()).format(Date(lastRefreshTime))}",
-                                color = TextSecondary,
-                                fontSize = 10.sp,
-                                fontFamily = FontFamily.Monospace
-                            )
+                            Column {
+                                Text(
+                                    text = "⚡ BİNANCE WEBSOCKET CANLI AKIŞ",
+                                    color = TextPrimary,
+                                    fontSize = 11.5.sp,
+                                    fontWeight = FontWeight.ExtraBold,
+                                    fontFamily = FontFamily.Monospace
+                                )
+                                Text(
+                                    text = "3dk & 5dk Kline + Derinlik (Son: ${SimpleDateFormat("HH:mm:ss", Locale.getDefault()).format(Date(lastRefreshTime))})",
+                                    color = TextSecondary,
+                                    fontSize = 10.sp,
+                                    fontFamily = FontFamily.Monospace
+                                )
+                            }
+                        }
+
+                        Surface(
+                            onClick = onManualRefresh,
+                            color = if (isRefreshing) EmeraldContainer else ObsidianCardElevated,
+                            shape = RoundedCornerShape(8.dp),
+                            border = BorderStroke(1.dp, EmeraldProfit.copy(alpha = 0.6f))
+                        ) {
+                            Row(
+                                modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(5.dp)
+                            ) {
+                                if (isRefreshing) {
+                                    CircularProgressIndicator(modifier = Modifier.size(11.dp), color = EmeraldProfit, strokeWidth = 2.dp)
+                                    Text("Yenileniyor...", color = EmeraldProfitBright, fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                                } else {
+                                    Icon(Icons.Default.Refresh, contentDescription = null, tint = EmeraldProfitBright, modifier = Modifier.size(13.dp))
+                                    Text("Şimdi Yenile", color = EmeraldProfitBright, fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                                }
+                            }
                         }
                     }
 
+                    // Dual AI Engine Status Strip
                     Surface(
-                        onClick = onManualRefresh,
-                        color = if (isRefreshing) EmeraldContainer else ObsidianCardElevated,
+                        color = ObsidianBg,
                         shape = RoundedCornerShape(8.dp),
-                        border = BorderStroke(1.dp, EmeraldProfit.copy(alpha = 0.6f))
+                        modifier = Modifier.fillMaxWidth()
                     ) {
                         Row(
-                            modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp),
+                            modifier = Modifier.padding(horizontal = 8.dp, vertical = 5.dp),
                             verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.spacedBy(5.dp)
+                            horizontalArrangement = Arrangement.SpaceBetween
                         ) {
-                            if (isRefreshing) {
-                                CircularProgressIndicator(modifier = Modifier.size(11.dp), color = EmeraldProfit, strokeWidth = 2.dp)
-                                Text("Yenileniyor...", color = EmeraldProfitBright, fontSize = 11.sp, fontWeight = FontWeight.Bold)
-                            } else {
-                                Icon(Icons.Default.Refresh, contentDescription = null, tint = EmeraldProfitBright, modifier = Modifier.size(13.dp))
-                                Text("Şimdi Yenile", color = EmeraldProfitBright, fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(5.dp)) {
+                                Text("🧠", fontSize = 11.sp)
+                                Text("Çekirdek: Gemini 3.1 Pro", color = EmeraldProfitBright, fontSize = 10.sp, fontWeight = FontWeight.Bold, fontFamily = FontFamily.Monospace)
+                            }
+                            Text("•", color = TextTertiary, fontSize = 10.sp)
+                            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(5.dp)) {
+                                Text("🚨", fontSize = 11.sp)
+                                Text("Yedek: Flash-Lite", color = IceCyanBright, fontSize = 10.sp, fontWeight = FontWeight.Bold, fontFamily = FontFamily.Monospace)
+                            }
+                            Text("•", color = TextTertiary, fontSize = 10.sp)
+                            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(5.dp)) {
+                                Text("📐", fontSize = 11.sp)
+                                Text("Kantitatif Çekirdek", color = GoldWarm, fontSize = 10.sp, fontWeight = FontWeight.Bold, fontFamily = FontFamily.Monospace)
                             }
                         }
                     }
@@ -2211,6 +2241,102 @@ fun LiveAssistantScreen(
                                 Text("🎯 TAKTİKSEL PUSU VE HACİM ANALİZİ:", color = IceCyanBright, fontSize = 10.sp, fontWeight = FontWeight.ExtraBold, fontFamily = FontFamily.Monospace)
                             }
 
+                            // QUANT METRICS STRIP: Z-SCORE, ATR, ORDER BOOK
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.spacedBy(6.dp)
+                            ) {
+                                val zVal = tech?.zScore ?: 0.0
+                                val zText = String.format(Locale.US, "%+.1fσ", zVal)
+                                val zColor = if (zVal <= -2.0) EmeraldProfitBright else if (zVal >= 2.0) CoralRed else IceCyanBright
+
+                                Surface(
+                                    modifier = Modifier.weight(1f),
+                                    color = ObsidianCardElevated,
+                                    shape = RoundedCornerShape(6.dp),
+                                    border = BorderStroke(0.5.dp, ObsidianBorder)
+                                ) {
+                                    Column(modifier = Modifier.padding(6.dp), horizontalAlignment = Alignment.CenterHorizontally) {
+                                        Text("Z-SKOR", color = TextTertiary, fontSize = 9.sp, fontWeight = FontWeight.Bold, fontFamily = FontFamily.Monospace)
+                                        Text(zText, color = zColor, fontSize = 11.sp, fontWeight = FontWeight.ExtraBold, fontFamily = FontFamily.Monospace)
+                                    }
+                                }
+
+                                Surface(
+                                    modifier = Modifier.weight(1f),
+                                    color = ObsidianCardElevated,
+                                    shape = RoundedCornerShape(6.dp),
+                                    border = BorderStroke(0.5.dp, ObsidianBorder)
+                                ) {
+                                    Column(modifier = Modifier.padding(6.dp), horizontalAlignment = Alignment.CenterHorizontally) {
+                                        Text("ATR (5M)", color = TextTertiary, fontSize = 9.sp, fontWeight = FontWeight.Bold, fontFamily = FontFamily.Monospace)
+                                        Text("$${String.format(Locale.US, if ((tech?.atr14 ?: 0.0) < 1.0) "%.4f" else "%.2f", tech?.atr14 ?: 0.0)}", color = IceCyanBright, fontSize = 11.sp, fontWeight = FontWeight.ExtraBold, fontFamily = FontFamily.Monospace)
+                                    }
+                                }
+
+                                Surface(
+                                    modifier = Modifier.weight(1f),
+                                    color = ObsidianCardElevated,
+                                    shape = RoundedCornerShape(6.dp),
+                                    border = BorderStroke(0.5.dp, ObsidianBorder)
+                                ) {
+                                    Column(modifier = Modifier.padding(6.dp), horizontalAlignment = Alignment.CenterHorizontally) {
+                                        Text("TAHTA BASKISI", color = TextTertiary, fontSize = 9.sp, fontWeight = FontWeight.Bold, fontFamily = FontFamily.Monospace)
+                                        val bidRatio = tech?.orderBookDepth?.bidRatio ?: 0.50
+                                        Text(
+                                            if (bidRatio >= 0.55) "%${(bidRatio * 100).toInt()} Alıcı" else "%${((1 - bidRatio) * 100).toInt()} Satıcı",
+                                            color = if (bidRatio >= 0.55) EmeraldProfitBright else CoralRed,
+                                            fontSize = 11.sp,
+                                            fontWeight = FontWeight.ExtraBold,
+                                            fontFamily = FontFamily.Monospace
+                                        )
+                                    }
+                                }
+                            }
+
+                            // ORDER BOOK DEPTH RATIO VISUAL BAR
+                            val bidPct = ((tech?.orderBookDepth?.bidRatio ?: 0.50) * 100).toInt()
+                            val askPct = 100 - bidPct
+                            Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                                Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                                    Text("🟢 Alıcı Duvarı: %$bidPct", color = EmeraldProfitBright, fontSize = 9.5.sp, fontWeight = FontWeight.Bold)
+                                    Text("🔴 Satıcı Baskısı: %$askPct", color = CoralRed, fontSize = 9.5.sp, fontWeight = FontWeight.Bold)
+                                }
+                                Row(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .height(4.dp)
+                                        .clip(RoundedCornerShape(2.dp))
+                                ) {
+                                    Box(modifier = Modifier.weight((bidPct.coerceIn(5, 95)).toFloat()).fillMaxHeight().background(EmeraldProfit))
+                                    Box(modifier = Modifier.weight((askPct.coerceIn(5, 95)).toFloat()).fillMaxHeight().background(CoralRed))
+                                }
+                            }
+
+                            // Volume Shock Warning if detected
+                            if (tech?.isVolumeShock == true) {
+                                Surface(
+                                    color = CoralRedContainer,
+                                    shape = RoundedCornerShape(6.dp),
+                                    modifier = Modifier.fillMaxWidth(),
+                                    border = BorderStroke(0.8.dp, CoralRed)
+                                ) {
+                                    Row(
+                                        modifier = Modifier.padding(horizontal = 8.dp, vertical = 5.dp),
+                                        verticalAlignment = Alignment.CenterVertically,
+                                        horizontalArrangement = Arrangement.spacedBy(6.dp)
+                                    ) {
+                                        Icon(Icons.Default.Warning, contentDescription = null, tint = CoralRed, modifier = Modifier.size(14.dp))
+                                        Text(
+                                            text = "⚠️ HACİM ŞOKU: Düşen bıçağı tutmayın. Hacim sakinleşene kadar pusu limitini bekletin.",
+                                            color = CoralRed,
+                                            fontSize = 9.5.sp,
+                                            fontWeight = FontWeight.Bold
+                                        )
+                                    }
+                                }
+                            }
+
                             if (tech != null && tech.volumeClusterDescription.isNotBlank()) {
                                 Text(
                                     text = "📊 ${tech.volumeClusterDescription}",
@@ -2241,23 +2367,23 @@ fun LiveAssistantScreen(
                                 }
                             }
 
-                            // 3-Tier DCA Breakdown Plan
+                            // Dynamic 1:2:4 DCA Breakdown Plan
                             val tier1P = entryLimitPrice
                             val tier2P = tech?.dcaTier2Price ?: (entryLimitPrice * 0.975)
                             val tier3P = tech?.dcaTier3Price ?: (entryLimitPrice * 0.950)
 
                             Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
-                                Text("🛡️ 3 Kademeli Savunma Planı (Sıfır Zarar):", color = TextSecondary, fontSize = 9.5.sp, fontWeight = FontWeight.Bold)
+                                Text("🛡️ 1:2:4 Kademeli Savunma Planı (Sıfır Zarar):", color = TextSecondary, fontSize = 9.5.sp, fontWeight = FontWeight.Bold)
                                 Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                                    Text("1. Kademe (%30 Bütçe):", color = TextTertiary, fontSize = 9.5.sp)
+                                    Text("1. Kademe (%15 Bütçe - 1x Giriş):", color = TextTertiary, fontSize = 9.5.sp)
                                     Text("$${String.format(Locale.US, if (tier1P < 1.0) "%.4f" else "%.2f", tier1P)} USDT", color = EmeraldProfitBright, fontSize = 10.sp, fontFamily = FontFamily.Monospace, fontWeight = FontWeight.Bold)
                                 }
                                 Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                                    Text("2. Kademe Dip (%35 Bütçe):", color = TextTertiary, fontSize = 9.5.sp)
+                                    Text("2. Kademe Dip (%30 Bütçe - 2x ATR Dip):", color = TextTertiary, fontSize = 9.5.sp)
                                     Text("$${String.format(Locale.US, if (tier2P < 1.0) "%.4f" else "%.2f", tier2P)} USDT", color = IceCyanBright, fontSize = 10.sp, fontFamily = FontFamily.Monospace, fontWeight = FontWeight.Bold)
                                 }
                                 Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                                    Text("3. Kademe Savunma (%35 Bütçe):", color = TextTertiary, fontSize = 9.5.sp)
+                                    Text("3. Kademe Savunma (%55 Bütçe - 4x Son Baraj):", color = TextTertiary, fontSize = 9.5.sp)
                                     Text("$${String.format(Locale.US, if (tier3P < 1.0) "%.4f" else "%.2f", tier3P)} USDT", color = GoldWarm, fontSize = 10.sp, fontFamily = FontFamily.Monospace, fontWeight = FontWeight.Bold)
                                 }
                             }
@@ -2907,7 +3033,9 @@ fun WeeklyReportScreen(
     historicalTrades: List<AppTradeEntity>
 ) {
     val context = LocalContext.current
+    val coroutineScope = rememberCoroutineScope()
     var latestReportText by remember { mutableStateOf("") }
+    var isGeneratingAiReport by remember { mutableStateOf(false) }
 
     LaunchedEffect(historicalTrades, capitalProfile) {
         val totalProfit = historicalTrades.sumOf { it.netProfitUsdt }
@@ -2922,6 +3050,8 @@ fun WeeklyReportScreen(
         prompt.appendLine("• Toplam Net Kâr: +$${String.format(Locale.US, "%.2f", totalProfit)} USDT")
         prompt.appendLine("• Mevcut Boş Kasa: $${String.format(Locale.US, "%.2f", currentCash)} USDT")
         prompt.appendLine("• Midas Komisyon Optimizasyonu: Aktif (%0.40 net kâra dahil)")
+        prompt.appendLine("• Veri Kaynağı: Binance WebSocket Canlı Akış (3m/5m/Derinlik)")
+        prompt.appendLine("• Motor: Gemini 3.1 Pro + Flash-Lite Fail-Over")
         prompt.appendLine("\n**Bu raporu kopyalayarak AI Studio asistanına iletebilir ve sistem stratejisini daha da geliştirebilirsiniz.**")
 
         latestReportText = prompt.toString()
@@ -2964,20 +3094,44 @@ fun WeeklyReportScreen(
                         lineHeight = 18.sp
                     )
 
-                    Button(
-                        onClick = {
-                            val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
-                            val clip = ClipData.newPlainText("Haftalık AI Raporu", latestReportText)
-                            clipboard.setPrimaryClip(clip)
-                            Toast.makeText(context, "📋 Rapor Panoya Kopyalandı!", Toast.LENGTH_SHORT).show()
-                        },
-                        modifier = Modifier.fillMaxWidth().height(42.dp),
-                        shape = RoundedCornerShape(8.dp),
-                        colors = ButtonDefaults.buttonColors(containerColor = EmeraldProfit, contentColor = Color.Black)
-                    ) {
-                        Icon(Icons.Default.ContentCopy, contentDescription = null, modifier = Modifier.size(16.dp))
-                        Spacer(modifier = Modifier.width(6.dp))
-                        Text("Haftalık Raporu Kopyala", fontWeight = FontWeight.Bold, fontSize = 12.sp)
+                    Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        Button(
+                            onClick = {
+                                val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
+                                val clip = ClipData.newPlainText("Haftalık AI Raporu", latestReportText)
+                                clipboard.setPrimaryClip(clip)
+                                Toast.makeText(context, "📋 Rapor Panoya Kopyalandı!", Toast.LENGTH_SHORT).show()
+                            },
+                            modifier = Modifier.weight(1f).height(42.dp),
+                            shape = RoundedCornerShape(8.dp),
+                            colors = ButtonDefaults.buttonColors(containerColor = EmeraldProfit, contentColor = Color.Black)
+                        ) {
+                            Icon(Icons.Default.ContentCopy, contentDescription = null, modifier = Modifier.size(16.dp))
+                            Spacer(modifier = Modifier.width(6.dp))
+                            Text("Raporu Kopyala", fontWeight = FontWeight.Bold, fontSize = 12.sp)
+                        }
+
+                        Button(
+                            onClick = {
+                                coroutineScope.launch {
+                                    isGeneratingAiReport = true
+                                    val aiAnalysis = com.example.service.GeminiMarketAnalystService.generateWeekendOptimizationReport(historicalTrades)
+                                    latestReportText = aiAnalysis
+                                    isGeneratingAiReport = false
+                                }
+                            },
+                            modifier = Modifier.weight(1f).height(42.dp),
+                            shape = RoundedCornerShape(8.dp),
+                            colors = ButtonDefaults.buttonColors(containerColor = IceCyanBright, contentColor = Color.Black)
+                        ) {
+                            if (isGeneratingAiReport) {
+                                CircularProgressIndicator(modifier = Modifier.size(14.dp), color = Color.Black, strokeWidth = 2.dp)
+                            } else {
+                                Icon(Icons.Default.Psychology, contentDescription = null, modifier = Modifier.size(16.dp))
+                                Spacer(modifier = Modifier.width(4.dp))
+                                Text("Gemini Analizi", fontWeight = FontWeight.Bold, fontSize = 12.sp)
+                            }
+                        }
                     }
                 }
             }

@@ -4,7 +4,9 @@ import com.example.engine.TechnicalAnalysisEngine
 import com.example.model.BinanceOracleData
 import com.example.model.CandleStick
 import com.example.model.CryptoAsset
+import com.example.model.OrderBookDepth
 import com.example.model.TechnicalAnalysis5m
+import com.example.service.BinanceWebSocketService
 import com.example.service.GeminiMarketAnalystService
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -13,6 +15,7 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -23,18 +26,23 @@ import java.net.HttpURLConnection
 import java.net.URL
 import java.util.Locale
 
+/**
+ * Single-Source Market Data Repository
+ * Powered by Binance WebSockets (Stream) & High-Speed REST fallback.
+ */
 object CryptoMarketRepository {
 
     private val repositoryScope = CoroutineScope(Dispatchers.Default)
-    private var livePriceJob: Job? = null
+    private var restPollingJob: Job? = null
+    private var wsSyncJob: Job? = null
 
-    // Tracked Major Crypto Pairs on Midas & Binance
-    val MONITORED_SYMBOLS = listOf("SOL", "BTC", "ETH", "AVAX", "XRP", "DOGE", "PEPE", "SUI")
+    // Tracked Major Crypto Pairs on Midas & Binance (Evening Scalping & Swing Targets)
+    val MONITORED_SYMBOLS = listOf("BTC", "ETH", "SOL", "AVAX", "XRP", "DOGE", "PEPE", "SUI")
 
     private val initialAssets = listOf(
-        CryptoAsset(id = "SOL", symbol = "SOL", name = "Solana", priceFormatted = "$0.00", rawPrice = 0.0, currencySymbol = "$", changePercent = 0.0, changeFormatted = "0.00%", isPositive = true, sparklinePoints = listOf(50f, 50f, 50f, 50f, 50f), sourceApp = "Midas Kripto", binanceReferencePrice = 0.0, leadLagDiffPercent = 0.0),
         CryptoAsset(id = "BTC", symbol = "BTC", name = "Bitcoin", priceFormatted = "$0.00", rawPrice = 0.0, currencySymbol = "$", changePercent = 0.0, changeFormatted = "0.00%", isPositive = true, sparklinePoints = listOf(50f, 50f, 50f, 50f, 50f), sourceApp = "Midas Kripto", binanceReferencePrice = 0.0, leadLagDiffPercent = 0.0),
         CryptoAsset(id = "ETH", symbol = "ETH", name = "Ethereum", priceFormatted = "$0.00", rawPrice = 0.0, currencySymbol = "$", changePercent = 0.0, changeFormatted = "0.00%", isPositive = true, sparklinePoints = listOf(50f, 50f, 50f, 50f, 50f), sourceApp = "Midas Kripto", binanceReferencePrice = 0.0, leadLagDiffPercent = 0.0),
+        CryptoAsset(id = "SOL", symbol = "SOL", name = "Solana", priceFormatted = "$0.00", rawPrice = 0.0, currencySymbol = "$", changePercent = 0.0, changeFormatted = "0.00%", isPositive = true, sparklinePoints = listOf(50f, 50f, 50f, 50f, 50f), sourceApp = "Midas Kripto", binanceReferencePrice = 0.0, leadLagDiffPercent = 0.0),
         CryptoAsset(id = "AVAX", symbol = "AVAX", name = "Avalanche", priceFormatted = "$0.00", rawPrice = 0.0, currencySymbol = "$", changePercent = 0.0, changeFormatted = "0.00%", isPositive = true, sparklinePoints = listOf(50f, 50f, 50f, 50f, 50f), sourceApp = "Midas Kripto", binanceReferencePrice = 0.0, leadLagDiffPercent = 0.0),
         CryptoAsset(id = "XRP", symbol = "XRP", name = "Ripple", priceFormatted = "$0.00", rawPrice = 0.0, currencySymbol = "$", changePercent = 0.0, changeFormatted = "0.00%", isPositive = true, sparklinePoints = listOf(50f, 50f, 50f, 50f, 50f), sourceApp = "Midas Kripto", binanceReferencePrice = 0.0, leadLagDiffPercent = 0.0),
         CryptoAsset(id = "DOGE", symbol = "DOGE", name = "Dogecoin", priceFormatted = "$0.00", rawPrice = 0.0, currencySymbol = "$", changePercent = 0.0, changeFormatted = "0.00%", isPositive = true, sparklinePoints = listOf(50f, 50f, 50f, 50f, 50f), sourceApp = "Midas Kripto", binanceReferencePrice = 0.0, leadLagDiffPercent = 0.0),
@@ -57,13 +65,38 @@ object CryptoMarketRepository {
     private val _lastRefreshTime = MutableStateFlow(System.currentTimeMillis())
     val lastRefreshTime: StateFlow<Long> = _lastRefreshTime.asStateFlow()
 
+    val isWebSocketConnected: StateFlow<Boolean> = BinanceWebSocketService.isConnected
+
     init {
-        startRealMarketDataEngine()
+        startMarketDataEngine()
     }
 
-    fun startRealMarketDataEngine() {
-        livePriceJob?.cancel()
-        livePriceJob = repositoryScope.launch {
+    fun startMarketDataEngine() {
+        // 1. Start Binance WebSocket combined streaming
+        BinanceWebSocketService.startStreaming(MONITORED_SYMBOLS)
+
+        // 2. Launch reactive WS sync job
+        wsSyncJob?.cancel()
+        wsSyncJob = repositoryScope.launch {
+            launch {
+                BinanceWebSocketService.livePrices.collectLatest { prices ->
+                    if (prices.isNotEmpty()) {
+                        updateAssetsWithPrices(prices)
+                    }
+                }
+            }
+            launch {
+                BinanceWebSocketService.candles5mMap.collectLatest { candlesMap ->
+                    if (candlesMap.isNotEmpty()) {
+                        recomputeTechnicalAnalyses(candlesMap)
+                    }
+                }
+            }
+        }
+
+        // 3. Launch REST Polling engine for initial bootstrap and backup synchronization
+        restPollingJob?.cancel()
+        restPollingJob = repositoryScope.launch {
             while (isActive) {
                 try {
                     fetchRealBinancePrices()
@@ -72,9 +105,44 @@ object CryptoMarketRepository {
                 } catch (e: Exception) {
                     // Graceful error handling
                 }
-                delay(3000) // Continuous 3-second market update
+                delay(3000) // 3-second heartbeat backup
             }
         }
+    }
+
+    private fun updateAssetsWithPrices(prices: Map<String, Double>) {
+        val updated = _cryptoAssets.value.map { asset ->
+            val wsPrice = prices[asset.symbol]
+            if (wsPrice != null && wsPrice > 0) {
+                asset.copy(
+                    rawPrice = wsPrice,
+                    priceFormatted = "$${String.format(Locale.US, if (wsPrice < 1.0) "%.4f" else "%.2f", wsPrice)}",
+                    binanceReferencePrice = wsPrice
+                )
+            } else asset
+        }
+        _cryptoAssets.value = updated
+    }
+
+    private fun recomputeTechnicalAnalyses(candlesMap: Map<String, List<CandleStick>>) {
+        val candles3mMap = BinanceWebSocketService.candles3mMap.value
+        val orderBooks = BinanceWebSocketService.orderBookMap.value
+        val newTechMap = _technicalAnalysisMap.value.toMutableMap()
+
+        candlesMap.forEach { (symbol, candles5m) ->
+            val candles3m = candles3mMap[symbol] ?: emptyList()
+            val orderBook = orderBooks[symbol]
+            val analysis = TechnicalAnalysisEngine.analyzeCandles(
+                symbol = symbol,
+                candles5m = candles5m,
+                candles3m = candles3m,
+                orderBook = orderBook
+            )
+            if (analysis != null) {
+                newTechMap[symbol] = analysis
+            }
+        }
+        _technicalAnalysisMap.value = newTechMap
     }
 
     fun refreshManually() {
@@ -176,26 +244,27 @@ object CryptoMarketRepository {
 
     private suspend fun fetchTechnicalCandles() = withContext(Dispatchers.IO) {
         val analysisResults = mutableMapOf<String, TechnicalAnalysis5m>()
-        val symbolsToAnalyze = listOf("SOL", "BTC", "ETH", "AVAX", "XRP", "DOGE", "SUI")
+        val symbolsToAnalyze = listOf("BTC", "ETH", "SOL", "AVAX", "XRP", "DOGE", "PEPE", "SUI")
+        val orderBooks = BinanceWebSocketService.orderBookMap.value
 
         for (symbol in symbolsToAnalyze) {
             try {
-                val url = URL("https://api.binance.com/api/v3/klines?symbol=${symbol}USDT&interval=5m&limit=30")
-                val conn = url.openConnection() as HttpURLConnection
-                conn.connectTimeout = 3000
-                conn.readTimeout = 3000
+                // Fetch 5m candles
+                val url5m = URL("https://api.binance.com/api/v3/klines?symbol=${symbol}USDT&interval=5m&limit=30")
+                val conn5m = url5m.openConnection() as HttpURLConnection
+                conn5m.connectTimeout = 3000
+                conn5m.readTimeout = 3000
 
-                if (conn.responseCode == 200) {
-                    val reader = BufferedReader(InputStreamReader(conn.inputStream))
+                val candleList5m = mutableListOf<CandleStick>()
+                if (conn5m.responseCode == 200) {
+                    val reader = BufferedReader(InputStreamReader(conn5m.inputStream))
                     val response = reader.readText()
                     reader.close()
 
                     val rawArray = JSONArray(response)
-                    val candleList = mutableListOf<CandleStick>()
-
                     for (i in 0 until rawArray.length()) {
                         val c = rawArray.getJSONArray(i)
-                        candleList.add(
+                        candleList5m.add(
                             CandleStick(
                                 openTime = c.getLong(0),
                                 open = c.getString(1).toDouble(),
@@ -207,40 +276,41 @@ object CryptoMarketRepository {
                             )
                         )
                     }
-
-                    val oracle = _binanceOracleMap.value[symbol]
-                    val spread = oracle?.leadLagSpreadPercent ?: 0.0
-
-                    val analysis = TechnicalAnalysisEngine.analyze5mCandles(
-                        symbol = symbol,
-                        candles = candleList,
-                        leadLagSpreadPercent = spread
-                    )
-                    analysisResults[symbol] = analysis
                 }
-                conn.disconnect()
+                conn5m.disconnect()
+
+                if (candleList5m.isNotEmpty()) {
+                    val analysis = TechnicalAnalysisEngine.analyzeCandles(
+                        symbol = symbol,
+                        candles5m = candleList5m,
+                        candles3m = emptyList(),
+                        orderBook = orderBooks[symbol]
+                    )
+                    if (analysis != null) {
+                        analysisResults[symbol] = analysis
+                    }
+                }
             } catch (e: Exception) {
                 // Ignore individual symbol network error
             }
         }
 
-        _technicalAnalysisMap.value = analysisResults
+        if (analysisResults.isNotEmpty()) {
+            _technicalAnalysisMap.value = analysisResults
+        }
     }
 
-    suspend fun getAiMarketAnalysis(symbol: String): String {
+    suspend fun getAiMarketAnalysis(symbol: String, tierName: String = "1. Kademe"): Pair<String, GeminiMarketAnalystService.EngineStatus> {
         val asset = _cryptoAssets.value.firstOrNull { it.symbol.equals(symbol, ignoreCase = true) }
         val price = asset?.rawPrice ?: 0.0
         val tech = _technicalAnalysisMap.value[symbol]
-        val oracle = _binanceOracleMap.value[symbol]
 
         return GeminiMarketAnalystService.analyzeTradeOpportunity(
             symbol = symbol,
             currentPrice = price,
-            supportLevel = tech?.supportLevel ?: (price * 0.98),
-            resistanceLevel = tech?.resistanceLevel ?: (price * 1.02),
-            rsi14 = tech?.rsi14 ?: 50.0,
-            binanceLeadPercent = oracle?.leadLagSpreadPercent ?: 0.0,
-            targetNetProfitPercent = 2.0
+            tech = tech,
+            targetNetProfitPercent = 2.0,
+            tierName = tierName
         )
     }
 }

@@ -22,14 +22,17 @@ data class ActionGuidance(
     val recommendedEntryPrice: Double? = null,
     val recommendedExitPrice: Double? = null,
     val netProfitUsdtExpected: Double? = null,
-    val reasoning: String = ""
+    val reasoning: String = "",
+    val isTrailingActive: Boolean = false,
+    val trailingLockPrice: Double = 0.0,
+    val isTimeoutWarning: Boolean = false
 )
 
 object AiAdvisorEngine {
 
     /**
      * Synthesizes Portfolio Capital, Active Trades, Live 5m Technical Indicators,
-     * and Historical Memory to produce the absolute clearest, immediate step-by-step guidance.
+     * Binance WebSocket Order Book Depth, Z-Score, ATR, and Trailing TP.
      */
     fun computeRealtimeGuidance(
         capitalProfile: CapitalProfileEntity?,
@@ -48,9 +51,9 @@ object AiAdvisorEngine {
                 title = "💼 MİDAS KASANIZI TANIMLAYIN",
                 statusBadge = "İLK KURULUM BEKLENİYOR",
                 statusColorHex = 0xFF00F0FF,
-                step1 = "1. Midas Kripto cüzdanınızdaki güncel boş USDT miktarınızı yukarıdaki butondan veya açılış ekranından girin.",
-                step2 = "2. Sistem girdiğiniz gerçek nakde göre en fazla 3 kademeli bütçe planlaması yapacaktır.",
-                step3 = "3. Varsa mevcut aldığınız coinleri 'Mevcut Varlığımı Ekle' diyerek anında takibe alabilirsiniz.",
+                step1 = "1. Midas Kripto cüzdanınızdaki güncel boş USDT miktarınızı girin.",
+                step2 = "2. Sistem 1:2:4 dinamik DCA kuralına göre kasa bütçesi oluşturur (Örn: $15 / $30 / $60).",
+                step3 = "3. Varsa mevcut aldığınız coinleri 'Mevcut Varlığımı Ekle' diyerek anında takibe alın.",
                 reasoning = "Sıfır varsayılan veya sahte bakiye tutulmaz; tamamen sizin girdiğiniz gerçek Midas USDT bakiyenizle çalışılır."
             )
         }
@@ -63,7 +66,7 @@ object AiAdvisorEngine {
                 statusColorHex = 0xFFFFB800,
                 step1 = "1. Midas'taki kullanılabilir USDT kasanız ($${String.format(Locale.US, "%.2f", cash)}), belirlediğiniz minimum güvenli eşiğin ($${String.format(Locale.US, "%.2f", minThreshold)}) altındadır.",
                 step2 = "2. Midas komisyonlarının (%0.40) kâr marjını eritmemesi ve sağlıklı kâr elde edilebilmesi için yeni alım önerisi duraklatıldı.",
-                step3 = "3. Midas'a USD yatırıp USDT'ye dönüştürerek kasayı güncelleyin veya 'Kasa' sekmesinden güvenlik eşiğini düzenleyin.",
+                step3 = "3. Midas'a USD yatırıp USDT'ye dönüştürerek kasayı güncelleyin veya güvenlik eşiğini düzenleyin.",
                 reasoning = "Sermaye koruma kuralı aktif. Düşük hacimli işlemler oransal komisyon yükünü artırır."
             )
         }
@@ -76,51 +79,82 @@ object AiAdvisorEngine {
 
             val pnlUsdt = (currentPrice - trade.entryPrice) * trade.coinAmount - trade.midasTotalFeeUsdt
             val pnlPercent = if (trade.investedUsdt > 0) (pnlUsdt / trade.investedUsdt) * 100.0 else 0.0
-            val isTargetHit = currentPrice >= trade.targetExitPrice
-            val isPumpingAboveTarget = currentPrice > trade.targetExitPrice * 1.005
+            val tradeDurationMinutes = (System.currentTimeMillis() - trade.openedAt) / (1000 * 60)
 
-            if (isTargetHit) {
-                val actionTitle = if (isPumpingAboveTarget) "🔥 FİYAT HEDEFİ AŞTI: ${trade.symbol}/USDT" else "🎯 HEDEF SATIŞ FİYATINA ULAŞILDI!"
-                val step1Text = if (isPumpingAboveTarget) {
-                    "1. Güncel fiyat ($${String.format(Locale.US, "%.2f", currentPrice)}), ilk planlanan $${String.format(Locale.US, "%.2f", trade.targetExitPrice)} USDT hedefinin çok üzerine çıktı (+%${String.format(Locale.US, "%.2f", pnlPercent)} Net Kâr)."
-                } else {
-                    "1. ${trade.symbol}/USDT anlık fiyatı ($${String.format(Locale.US, "%.2f", currentPrice)}), belirlediğimiz $${String.format(Locale.US, "%.2f", trade.targetExitPrice)} USDT hedef satışını geçti!"
-                }
-                val step2Text = if (isPumpingAboveTarget) {
-                    "2. Coin hâlâ elinizdeyse Midas'ta anlık piyasa fiyatından ($${String.format(Locale.US, "%.2f", currentPrice)}) hemen satabilir veya hedefi daha yukarı güncelleyebilirsiniz."
-                } else {
-                    "2. Midas hesabınızı kontrol edin: $${String.format(Locale.US, "%.2f", trade.targetExitPrice)} USDT limit satış emrinizin gerçekleşip gerçekleşmediğine bakın."
-                }
+            // Trailing Take-Profit Logic (+2.0% Net Profit Trigger, +1.80% Lock)
+            val netGrossRatio = (currentPrice - trade.entryPrice) / trade.entryPrice
+            val isTrailingTriggered = netGrossRatio >= 0.0240 // Net ~2.00%
+            val trailingLockPrice = trade.entryPrice * 1.0220 // Locks +1.80% Net profit after 0.40% Midas fee
 
+            // 90-minute Timeout Break-Even Exit Logic (+0.10% net to recycle capital)
+            val isTimeoutBreakEven = tradeDurationMinutes >= 90 && pnlPercent < 1.0
+            val timeoutExitPrice = trade.entryPrice * 1.0050 // +0.10% Net after fee
+
+            if (isTrailingTriggered) {
                 return ActionGuidance(
-                    title = actionTitle,
+                    title = "🚀 İZ SÜREN KÂR AL (TRAILING TP) AKTİF: ${trade.symbol}",
+                    statusBadge = "KÂR KİLİTLENDİ (+%${String.format(Locale.US, "%.2f", pnlPercent)} NET)",
+                    statusColorHex = 0xFF00FF9D,
+                    step1 = "1. Hedef +%2.0 kâr aşıldı! Minimum kâr $${String.format(Locale.US, "%.2f", trailingLockPrice)} fiyatında kilitlendi (+%1.80 Net).",
+                    step2 = "2. Fiyat yükselmeye devam ettikçe pozisyonu koruyun, düşüş başlarsa kilit fiyattan ($${String.format(Locale.US, "%.2f", trailingLockPrice)}) satın.",
+                    step3 = "3. Satışı bitirince 'Satıldı & Kasaya Aktar' butonuna basın.",
+                    targetSymbol = trade.symbol,
+                    recommendedExitPrice = currentPrice,
+                    netProfitUsdtExpected = pnlUsdt,
+                    reasoning = "İz süren kâr algoritması devrede: Maksimum yükselişi yakalarken dip kâr garanti altına alındı.",
+                    isTrailingActive = true,
+                    trailingLockPrice = trailingLockPrice
+                )
+            }
+
+            if (isTimeoutBreakEven) {
+                return ActionGuidance(
+                    title = "⏱️ 90 DK ZAMAN AŞIMI: SERMAYE BOŞALTMA PLANI",
+                    statusBadge = "BAŞA BAŞ ÇIKIŞ (${tradeDurationMinutes} DK)",
+                    statusColorHex = 0xFFFFB800,
+                    step1 = "1. Pozisyon 90 dakikadır hedef dirence ulaşamadı. Akşam seansı sermayesini tazelemek için başa baş çıkış önerilir.",
+                    step2 = "2. Midas'ta $${String.format(Locale.US, "%.2f", timeoutExitPrice)} USDT limit satış emri girerek komisyonsuz sıfır zararla nakde geçin.",
+                    step3 = "3. Çıkış gerçekleştikten sonra daha yüksek ivmeli yeni bir pusuya geçilecektir.",
+                    targetSymbol = trade.symbol,
+                    recommendedExitPrice = timeoutExitPrice,
+                    netProfitUsdtExpected = 0.05,
+                    reasoning = "Zaman maliyeti koruması: Durgun tahtada kilitli kalmamak adına +%0.10 net başa baş çıkış uygulanır.",
+                    isTimeoutWarning = true
+                )
+            }
+
+            val isTargetHit = currentPrice >= trade.targetExitPrice
+            if (isTargetHit) {
+                return ActionGuidance(
+                    title = "🎯 HEDEF SATIŞ FİYATINA ULAŞILDI!",
                     statusBadge = "KÂR REALİZASYONU (+%${String.format(Locale.US, "%.2f", pnlPercent)} NET)",
                     statusColorHex = 0xFF00FF9D,
-                    step1 = step1Text,
-                    step2 = step2Text,
-                    step3 = "3. Satış yaptıktan sonra 'Satışı Kasaya Ekle' butonuna basıp Midas'ta gerçekleşen gerçek satış fiyatınızı onaylayarak kasanıza kârı aktarın.",
+                    step1 = "1. ${trade.symbol}/USDT anlık fiyatı ($${String.format(Locale.US, "%.2f", currentPrice)}), belirlediğimiz $${String.format(Locale.US, "%.2f", trade.targetExitPrice)} USDT hedef satışını geçti!",
+                    step2 = "2. Midas hesabınızı kontrol edin: $${String.format(Locale.US, "%.2f", trade.targetExitPrice)} USDT limit satış emrinizin gerçekleşip gerçekleşmediğine bakın.",
+                    step3 = "3. Satış yaptıktan sonra 'Satışı Kasaya Ekle' butonuna basarak kasanıza kârı aktarın.",
                     targetSymbol = trade.symbol,
                     recommendedExitPrice = currentPrice.coerceAtLeast(trade.targetExitPrice),
                     netProfitUsdtExpected = pnlUsdt,
-                    reasoning = if (isPumpingAboveTarget) "Fiyat hedefi aştı. Kârı daha yüksekten almak veya yeni tepe hedefi belirlemek sizin kontrolünüzde." else "5 dakikalık hedef direnç testi başarıyla tamamlandı. Sıfır zarar prensibi korundu."
+                    reasoning = "5 dakikalık hedef direnç testi başarıyla tamamlandı. Sıfır zarar prensibi korundu."
                 )
             } else {
                 val tech = techMap[trade.symbol]
-                val isDcaPossible = trade.dcaLevel < trade.maxDcaLevels && cash >= 15.0 && tech != null && currentPrice < trade.entryPrice * 0.985
+                val nextTierPrice = if (trade.dcaLevel == 1) tech?.dcaTier2Price ?: (trade.entryPrice * 0.97) else tech?.dcaTier3Price ?: (trade.entryPrice * 0.94)
+                val isDcaPossible = trade.dcaLevel < trade.maxDcaLevels && cash >= 15.0 && currentPrice <= nextTierPrice
 
                 val dcaNote = if (isDcaPossible) {
-                    " (Maliyet Düşürme: $${String.format(Locale.US, "%.2f", tech!!.supportLevel)} USDT seviyesinden ${trade.dcaLevel + 1}. kademe limit alış girilebilir)"
+                    " (Dinamik ATR Desteği: $${String.format(Locale.US, "%.2f", nextTierPrice)} USDT seviyesinden ${trade.dcaLevel + 1}. kademe eklenebilir)"
                 } else if (trade.dcaLevel >= trade.maxDcaLevels) {
-                    " (3/3 Kademe Tamamlandı - İlave alım yapılmaz, sadece kârlı satış beklenir)"
+                    " (3/3 Kademe Tamamlandı - İlave ekleme yapılmaz, sadece kârlı çıkış beklenir)"
                 } else ""
 
                 return ActionGuidance(
                     title = "⏳ SPOT SABIR MODU: ${trade.symbol}/USDT BEKLENİYOR",
                     statusBadge = if (pnlUsdt >= 0) "KÂRDA (+${String.format(Locale.US, "%.2f", pnlUsdt)} USDT)" else "DİPTE BEKLEMEDE (${String.format(Locale.US, "%.2f", pnlUsdt)} USDT)",
                     statusColorHex = if (pnlUsdt >= 0) 0xFF00FF9D else 0xFFFFB800,
-                    step1 = "1. MİDAS'TA GİRİLECEK LİMİT SATIŞ: $${String.format(Locale.US, "%.2f", trade.targetExitPrice)} USDT fiyatından satış emrinizi açık tutun.",
+                    step1 = "1. MİDAS LİMİT SATIŞ: $${String.format(Locale.US, "%.2f", trade.targetExitPrice)} USDT emrinizi açık tutun.",
                     step2 = "2. Kuralımız: KESİNLİKLE ZARARINA SATIŞ YOK. Spot varlıkta sabırla beklenir.$dcaNote",
-                    step3 = "3. Hedefe %${String.format(Locale.US, "%.2f", ((trade.targetExitPrice - currentPrice) / currentPrice).coerceAtLeast(0.0) * 100.0)} kaldı. Satış dolunca 'Satıldı & Kapat' butonuna basın.",
+                    step3 = "3. Hedefe %${String.format(Locale.US, "%.2f", ((trade.targetExitPrice - currentPrice) / currentPrice).coerceAtLeast(0.0) * 100.0)} kaldı. Hedef dolunca kasaya aktarın.",
                     targetSymbol = trade.symbol,
                     recommendedExitPrice = trade.targetExitPrice,
                     reasoning = "Sıfır zarar stratejisi: Spot varlıkta panik satışı yapılmaz, kârlı limit emrin dolması beklenir."
@@ -135,50 +169,60 @@ object AiAdvisorEngine {
         for (asset in assets) {
             val tech = techMap[asset.symbol] ?: continue
             val score = tech.confluenceScore
-            if (score > highestScore && !tech.isOverboughtRisk) {
+            // Filter out volume shocks (knife catch) and seller dominant order books (<60% buyers)
+            if (score > highestScore && !tech.isOverboughtRisk && !tech.isVolumeShock && !tech.orderBookDepth.isOrderBookFear) {
                 highestScore = score
                 bestOpportunity = Pair(asset, tech)
             }
         }
 
-        if (bestOpportunity != null && highestScore >= 65) {
+        if (bestOpportunity != null && highestScore >= 60) {
             val (asset, tech) = bestOpportunity
-            val entryLimit = tech.supportLevel
-            // Net 2.5% profit target + 0.40% total Midas buy/sell commission
-            val targetExit = entryLimit * (1.0 + (2.5 + 0.40) / 100.0)
-            val expectedNetUsdt = (cash * 0.50).coerceAtLeast(minThreshold) * 0.025
+            val entryLimit = tech.dcaTier1Price.takeIf { it > 0 } ?: tech.supportLevel
+            // Net 2.0% profit target + 0.40% total Midas buy/sell commission
+            val targetExit = entryLimit * (1.0 + (2.0 + 0.40) / 100.0)
+            val tier1InvestBudget = (cash * (1.0 / 7.0)).coerceIn(15.0, (cash * 0.35).coerceAtLeast(15.0))
+            val expectedNetUsdt = tier1InvestBudget * 0.020
+
+            val orderBookRatio = String.format(Locale.US, "%.0f", tech.orderBookDepth.bidRatio * 100)
+            val zScoreText = String.format(Locale.US, "%.2f", tech.zScore)
 
             return ActionGuidance(
-                title = "🎯 TAKTİKSEL PUSU LİMİT ALIŞ: ${asset.symbol}/USDT",
+                title = "🎯 1:2:4 KANTİTATİF PUSU GİRİŞİ: ${asset.symbol}/USDT",
                 statusBadge = "GÜÇLÜ PUSU SİNYALİ (SKOR: %$highestScore)",
                 statusColorHex = 0xFF00FF9D,
-                step1 = "1. MİDAS'TA GİRİLECEK LİMİT ALIŞ: $${String.format(Locale.US, if (entryLimit < 1.0) "%.4f" else "%.2f", entryLimit)} USDT fiyatından limit alış emri girip pusuya yatın.",
-                step2 = "2. ⏱️ PUSU SÜRESİ (${tech.ambushTimeoutMinutes} DK): ${tech.ambushTimeoutMinutes} dakika beklenir. Fiyat desteğe inmeden tepeye dönerse emir iptal edilir, yeni pusu kurulur.",
-                step3 = "3. 🎯 ÇIKIŞ PLANI: Alım dolduğu anda Midas'ta $${String.format(Locale.US, if (targetExit < 1.0) "%.4f" else "%.2f", targetExit)} USDT limit satış açılır (+%2.5 Net Kâr). Sıfır zarar kuralı aktiftir.",
+                step1 = "1. MİDAS 1. KADEME LİMİT ALIŞ: $${String.format(Locale.US, if (entryLimit < 1.0) "%.4f" else "%.2f", entryLimit)} USDT fiyatından ~$${String.format(Locale.US, "%.0f", tier1InvestBudget)} limit alış girin.",
+                step2 = "2. 🛡️ ATR DİP KORUMASI: Fiyat sarkarsa 2. Kademe ($${String.format(Locale.US, "%.2f", tech.dcaTier2Price)}) ve 3. Kademe ($${String.format(Locale.US, "%.2f", tech.dcaTier3Price)}) hazır bekler.",
+                step3 = "3. 🎯 KÂR ÇIKIŞI (+%2.0 NET): Alım dolduğu anda Midas'ta $${String.format(Locale.US, if (targetExit < 1.0) "%.4f" else "%.2f", targetExit)} USDT limit satış açılır.",
                 targetSymbol = asset.symbol,
                 recommendedEntryPrice = entryLimit,
                 recommendedExitPrice = targetExit,
                 netProfitUsdtExpected = expectedNetUsdt,
-                reasoning = "${tech.volumeClusterDescription}. RSI (${String.format(Locale.US, "%.1f", tech.rsi14)}) aşırı satım bölgesinde ve EMA21 desteğinde."
+                reasoning = "Binance Tahtası: %$orderBookRatio Alıcı Duvarı | Z-Score: ${zScoreText}σ | ATR: ${String.format(Locale.US, "%.2f", tech.atr14)} | RSI: ${String.format(Locale.US, "%.1f", tech.rsi14)}"
             )
         }
 
-        // 4. Case: Piyasa Aşırı Alımda veya Kararsızsa (Sabır Modu)
+        // 4. Case: Piyasa Kararsızsa veya Bıçak Düşüşü Varsa
+        val volumeShockAsset = assets.firstOrNull { techMap[it.symbol]?.isVolumeShock == true }
+        val fearAsset = assets.firstOrNull { techMap[it.symbol]?.orderBookDepth?.isOrderBookFear == true }
+
+        val sabirReason = when {
+            volumeShockAsset != null -> "${volumeShockAsset.symbol} paritesinde ani satış hacmi şoku var. Düşen bıçağı tutmamak için hacmin sakinleşmesi bekleniyor."
+            fearAsset != null -> "Binance tahtasında alıcı duvarı <%60 seviyesinde. Satış baskısı dindiğinde pusu kurulacak."
+            else -> "İncelenen varlıklarda sağlıklı dip destek oluşumu ve RSI/Z-Score soğuması izleniyor."
+        }
+
         return ActionGuidance(
-            title = "🛡️ SABIR MODU: PİYASA TEPE DİRENCİNDE",
-            statusBadge = "BEKLEMEDE (RİSKLİ BÖLGE)",
+            title = "🛡️ SABIR MODU: NAKİTTE (USDT) BEKLEME",
+            statusBadge = "PUSU HAZIRLIĞI",
             statusColorHex = 0xFF00F0FF,
-            step1 = "1. İncelenen kripto paralar 5 dakikalık direnç seviyelerine yakın veya RSI aşırı alım bölgesinde.",
-            step2 = "2. Tepeden alım yapmamak ve sermayeyi korumak adına nakitte (USDT) kalın.",
-            step3 = "3. 5 dakikalık grafiklerde sağlıklı bir dip destek oluşumu ve RSI soğuması izleniyor.",
-            reasoning = "Yüksek fiyattan giriş yapıp terste kalmamak için dip sekmesi bekleniyor."
+            step1 = "1. Akşam seansı için yüksek istatistiki güvenlikli dip aranıyor.",
+            step2 = "2. Hacim şoku veya zayıf tahtada acele işlem yapmayıp nakit USDT'yi koruyun.",
+            step3 = "3. Z-Score <-2.5 sapması ve %60+ alıcı duvarı oluştuğunda anında 1. Kademe bildirimi gelecektir.",
+            reasoning = sabirReason
         )
     }
 
-    /**
-     * Directly establishes the user's real initial Midas cash balance without calculating
-     * any fake withdrawals or prior discrepancies.
-     */
     suspend fun setInitialCashBalance(
         dao: AppDatabaseDao,
         initialCashUsdt: Double,
@@ -201,9 +245,6 @@ object AiAdvisorEngine {
         newProfile
     }
 
-    /**
-     * Completely resets all trades, memory, and capital profiles to absolute zero (factory fresh).
-     */
     suspend fun resetAllDatabase(dao: AppDatabaseDao) = withContext(Dispatchers.IO) {
         dao.clearAllTrades()
         dao.clearCapitalProfile()
@@ -211,10 +252,6 @@ object AiAdvisorEngine {
         dao.clearCoinMemory()
     }
 
-    /**
-     * Smart Cash Auditor: Detects whether cash was withdrawn as USD to bank
-     * or deposited without bothering the user.
-     */
     suspend fun auditCashUpdate(
         dao: AppDatabaseDao,
         newCashAmountUsdt: Double
@@ -231,11 +268,9 @@ object AiAdvisorEngine {
         val diff = newCashAmountUsdt - prevObserved
 
         if (diff < -0.50) {
-            // Cash decreased without trade loss -> User converted USDT to USD and withdrew to bank!
             val withdrawn = Math.abs(diff)
             updatedWithdrawn += withdrawn
         } else if (diff > 0.50) {
-            // Cash increased -> User deposited USD and bought USDT!
             updatedDeposited += diff
         }
 
@@ -252,10 +287,6 @@ object AiAdvisorEngine {
         updatedProfile
     }
 
-    /**
-     * Executes a 3-tier DCA averaging step: lowers average entry cost and recalculates
-     * target exit price with net 2.0% profit + Midas %0.40 fee.
-     */
     suspend fun executeDcaStep(
         dao: AppDatabaseDao,
         tradeId: Long,
@@ -291,9 +322,6 @@ object AiAdvisorEngine {
         updatedTrade
     }
 
-    /**
-     * Closes an active trade with realized PnL, updates Coin Memory, and restores cash balance.
-     */
     suspend fun closeActiveTrade(
         dao: AppDatabaseDao,
         tradeId: Long,
@@ -346,9 +374,6 @@ object AiAdvisorEngine {
         updatedTrade
     }
 
-    /**
-     * Updates the target exit price for an open trade.
-     */
     suspend fun updateTradeTarget(
         dao: AppDatabaseDao,
         tradeId: Long,
@@ -360,9 +385,6 @@ object AiAdvisorEngine {
         updatedTrade
     }
 
-    /**
-     * Generates a comprehensive, clean, Markdown weekly report for the user to copy & paste.
-     */
     suspend fun generateWeeklyReport(
         dao: AppDatabaseDao,
         context: Context
@@ -387,11 +409,13 @@ object AiAdvisorEngine {
         val dateFormat = SimpleDateFormat("dd MMMM yyyy", Locale("tr", "TR"))
         val weekLabel = "Haftalık Analiz (${dateFormat.format(Date(capital.weekStartTimestamp))} - ${dateFormat.format(Date())})"
 
-        val aiEvaluation = if (isTargetMet) {
-            "Midas %0.40 komisyonları hesaba katılarak disiplinli 5 dakikalık dip destek stratejisi uygulandı. %${String.format(Locale.US, "%.1f", capital.weeklyTargetPercent)} hedefi aşılarak %${String.format(Locale.US, "%.2f", netGrowthPct)} net USDT büyümesi sağlandı. En yüksek verim $bestCoin/USDT paritesinde gerçekleşti."
-        } else {
-            "Haftalık %${String.format(Locale.US, "%.1f", capital.weeklyTargetPercent)} hedefine yaklaşıldı (%${String.format(Locale.US, "%.2f", netGrowthPct)}). Düşük oynaklık yaşanan saatlerde gereksiz işlemden kaçınıldı, kasanın güvenliği ön planda tutuldu."
-        }
+        val aiEvaluation = GeminiMarketAnalystService.generateWeekendOptimizationReport(
+            totalTrades = totalTradesCount,
+            winRate = winRate,
+            netProfitUsdt = totalNetPnl,
+            bestCoin = bestCoin,
+            recentTradesJson = ""
+        )
 
         val fullMarkdown = """
             ==================================================
@@ -410,12 +434,12 @@ object AiAdvisorEngine {
             • Kazanma Oranı (Win Rate): %${String.format(Locale.US, "%.1f", winRate)}
             • En Verimli Kripto: $bestCoin/USDT
 
-            🧠 YAPAY ZEKÂ ANALİZ VE DEĞERLENDİRMESİ:
+            🧠 YAPAY ZEKÂ KANTİTATİF RAPORU:
             $aiEvaluation
 
             ⚙️ GELECEK HAFTA İÇİN SİSTEM ÖNERİSİ:
-            - Midas %0.40 komisyon optimizasyonu aktif tutulmalı.
-            - $bestCoin/USDT ve SOL/USDT 5dk dip desteklerindeki likidite öncülüğü takip edilmeli.
+            - Midas %0.40 komisyon optimizasyonu ve 1:2:4 ATR DCA aktif tutulacak.
+            - $bestCoin/USDT ve BTC/USDT 5dk dip desteklerindeki likidite öncülüğü takip edilecek.
             ==================================================
         """.trimIndent()
 
