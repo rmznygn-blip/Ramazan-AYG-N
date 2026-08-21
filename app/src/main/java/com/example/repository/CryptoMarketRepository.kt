@@ -128,6 +128,8 @@ object CryptoMarketRepository {
         val candles3mMap = BinanceWebSocketService.candles3mMap.value
         val orderBooks = BinanceWebSocketService.orderBookMap.value
         val newTechMap = _technicalAnalysisMap.value.toMutableMap()
+        val updatedAssets = _cryptoAssets.value.toMutableList()
+        var assetsChanged = false
 
         candlesMap.forEach { (symbol, candles5m) ->
             val candles3m = candles3mMap[symbol] ?: emptyList()
@@ -141,8 +143,23 @@ object CryptoMarketRepository {
             if (analysis != null) {
                 newTechMap[symbol] = analysis
             }
+
+            // Extract last 20 close prices for live MiniSparkline visualization
+            val recentCloses = candles5m.takeLast(20).map { it.close.toFloat() }
+            if (recentCloses.isNotEmpty()) {
+                val assetIndex = updatedAssets.indexOfFirst { it.symbol == symbol }
+                if (assetIndex != -1) {
+                    val curr = updatedAssets[assetIndex]
+                    updatedAssets[assetIndex] = curr.copy(sparklinePoints = recentCloses)
+                    assetsChanged = true
+                }
+            }
         }
         _technicalAnalysisMap.value = newTechMap
+
+        if (assetsChanged) {
+            _cryptoAssets.value = updatedAssets
+        }
     }
 
     fun refreshManually() {
