@@ -807,32 +807,35 @@ object AiAdvisorEngine {
 
         val dropPercent = (((safeCurrent - sniperPrice) / safeCurrent) * 100.0).coerceAtLeast(0.15)
 
-        // Havalı ve Prestijli Eğitici AI Mentör Açıklaması
+        // Şeffaf, Eğitici, Güven Veren ve Sade AI Mentör Açıklaması
         val mentorReason = buildString {
-            append("🎯 QUANT AI MENTÖR (Kurumsal Sniper Raporu): ")
-            // VWAP Kalkanı
+            // 1. VWAP & Fiyat Yeri
             if (vwap > 0) {
                 val vwapStr = String.format(Locale.US, if (vwap < 1.0) "%.4f" else "%.2f", vwap)
                 if (safeCurrent < vwap) {
-                    append("⚡ VWAP Kalkanı ($$vwapStr): Fiyat VWAP altında taban arıyor (+%${String.format(Locale.US, "%.2f", vwapDistancePct)} mıknatıs çekim potansiyeli). ")
+                    append("📍 VWAP ($$vwapStr) Altındayız: Fiyat gün içi ortalamanın altında, dip oluşturuyor. VWAP'a doğru mıknatıs çekim potansiyeli (+%${String.format(Locale.US, "%.1f", vwapDistancePct)}) mevcut. ")
                 } else {
-                    append("⚡ VWAP Üzeri Güçlü Akış ($$vwapStr): Kurumsal ortalama üzerinde tutunuyor. ")
+                    append("📍 VWAP ($$vwapStr) Üzerindeyiz: Fiyat kurumsal ortalamanın üzerinde güçlü tutunuyor. ")
                 }
             }
-            // Hacim İvmesi & Anti-Spoofing
+            // 2. Bollinger & Destek
+            if (safeCurrent <= bbLower * 1.004) {
+                append("📉 Bollinger Alt Bandı Desteği: Fiyat aşırı satım bölgesine değerek tepki alanına girdi. ")
+            }
+            // 3. Alıcı Duvarı & Hacim
+            val buyerPct = String.format(Locale.US, "%.0f", bidRatio * 100)
             if (isVolumeConfirmed) {
-                append("🌊 Hacim İvmesi (${String.format(Locale.US, "%.2f", volMomentum)}x): Tahtadaki %${String.format(Locale.US, "%.0f", bidRatio * 100)} alıcı duvarı sahte emir (spoofing) değil, gerçek kurumsal para girişiyle teyit edildi. ")
+                append("🟢 Güçlü Alıcı Duvarı: Tahtada %$buyerPct alıcı baskısı var ve bu sahte değil, gerçek ${String.format(Locale.US, "%.1f", volMomentum)}x hacim ivmesiyle destekleniyor. ")
             } else {
-                append("🛡️ Tahta Dengesi: %${String.format(Locale.US, "%.0f", bidRatio * 100)} alıcı derinliği izleniyor. ")
+                append("🟢 Alıcı Oranı: Tahtada %$buyerPct alıcı derinliği korunuyor. ")
             }
-            // Düşen Bıçak Durumu
+            // 4. Bıçak veya Dönüş
             if (isFallingKnifeActive) {
-                append("⚠️ Düşen Bıçak Sensörü Devrede: Mum kapanışında kırmızı baskı var, emri güvenli taban desteğine ($${String.format(Locale.US, if (sniperPrice < 1.0) "%.4f" else "%.2f", sniperPrice)}) kurduk. ")
+                append("⚠️ Düşen Bıçak Koruması: Fiyat kırmızı mumda olduğu için tepeden değil, dip taban desteğinden ($${String.format(Locale.US, if (sniperPrice < 1.0) "%.4f" else "%.2f", sniperPrice)}) pusu kuruldu. ")
             } else if (isLastCandleGreen || isLowerWickBounce) {
-                append("🟢 Yeşil Dönüş Teyidi: Dip fitilinden alıcı tepkisi geldi. ")
+                append("✨ Mum Teyidi: Dip fitilinden yeşil toparlanma mumu geldi. ")
             }
-            // Z-Score & ATR
-            append("Z-Skor: ${String.format(Locale.US, "%.2f", zScore)}σ (İstatistiki Güvenilirlik) | ATR: $${String.format(Locale.US, if (atr < 1.0) "%.4f" else "%.2f", atr)}.")
+            append("🎯 Bu pusu, spot piyasada sıfır panik ve sabırla hedefe ulaşmak için matematiksel olarak en korunaklı giriş seviyesidir.")
         }
 
         val singleSniperOption = SmartEntryPlan(
