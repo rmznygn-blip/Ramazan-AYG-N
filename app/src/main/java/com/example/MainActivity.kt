@@ -57,6 +57,7 @@ import androidx.core.content.ContextCompat
 import com.example.data.local.*
 import com.example.engine.ActionGuidance
 import com.example.engine.AiAdvisorEngine
+import com.example.engine.AmbushWizardStep
 import com.example.model.BinanceOracleData
 import com.example.model.CandleStick
 import com.example.model.CryptoAsset
@@ -564,12 +565,12 @@ fun CryptoAnalystMasterApp() {
                 )
             }
 
-            // 1.5 MODAL: STRATEJİ ODASI (WAR ROOM) - Kilitli Snapshot Mimari & 5m Mumlar & AI Mentör (ModalBottomSheet)
+            // 1.5 MODAL: DİNAMİK ASİSTAN (WIZARD) & 4 AŞAMALI DCA DURUM MAKİNESİ (ModalBottomSheet)
             selectedAssetDetails?.let { asset ->
                 val tech = technicalAnalysisMap[asset.symbol]
                 val oracle = binanceOracleMap[asset.symbol]
                 
-                // SNAPSHOT KİLİDİ: ModalBottomSheet ilk açıldığı andaki fiyat ve teknik veriler dondurulur (titreme/stres engellenir)
+                // SNAPSHOT KİLİDİ: ModalBottomSheet ilk açıldığı andaki fiyat ve teknik veriler dondurulur (titreme engellenir)
                 val snapshotCurrentPrice = remember(asset.symbol) {
                     if (asset.rawPrice > 0) asset.rawPrice else (oracle?.binanceGlobalPrice ?: 0.0)
                 }
@@ -579,17 +580,24 @@ fun CryptoAnalystMasterApp() {
                 }
                 val snapshotRecommendedPlan = snapshotStrategyAnalysis.options.firstOrNull { it.isRecommended } ?: snapshotStrategyAnalysis.options[0]
 
-                val snapshotTimeout = remember(asset.symbol) {
-                    AiAdvisorEngine.calculateOptimalAmbushTimeout(asset, tech).first
+                val snapshotEntryPrice = snapshotRecommendedPlan.price
+                val snapshotTier2Price = snapshotEntryPrice * 0.99 // 2. Kademe (%1 altı)
+                val snapshotTier3Price = snapshotEntryPrice * 0.98 // 3. Kademe (%2 altı)
+
+                // 4 Aşamalı Dinamik Durum Makinesi State'i
+                var wizardStep by remember(asset.symbol) { mutableStateOf(AmbushWizardStep.STEP1_AMBUSH_WAITING) }
+
+                val wizardState = remember(wizardStep, asset.symbol, snapshotEntryPrice, snapshotCurrentPrice) {
+                    AiAdvisorEngine.computeWizardState(
+                        step = wizardStep,
+                        symbol = asset.symbol,
+                        baseEntryPrice = snapshotEntryPrice,
+                        currentPrice = snapshotCurrentPrice
+                    )
                 }
 
-                val snapshotEntryPrice = snapshotRecommendedPlan.price
-                val snapshotTargetExitPrice = snapshotEntryPrice * 1.01 // Net %1.0 Kâr (1. Kademe * 1.01)
-                val snapshotTier2Price = snapshotEntryPrice * 0.99 // 2. Kademe = 1. Kademe * 0.99
-                val snapshotTier3Price = snapshotEntryPrice * 0.98 // 3. Kademe = 1. Kademe * 0.98
-
-                val buyerRatio = ((tech?.orderBookDepth?.bidRatio ?: 0.55) * 100.0).coerceIn(10.0, 90.0)
-                val sellerRatio = (100.0 - buyerRatio).coerceIn(10.0, 90.0)
+                val context = LocalContext.current
+                val clipboardManager = remember { context.getSystemService(Context.CLIPBOARD_SERVICE) as? android.content.ClipboardManager }
 
                 ModalBottomSheet(
                     onDismissRequest = { selectedAssetDetails = null },
@@ -631,13 +639,13 @@ fun CryptoAnalystMasterApp() {
                                 }
                                 Column {
                                     Text(
-                                        text = "⚔️ Strateji Odası",
+                                        text = "⚡ Dinamik DCA Asistanı",
                                         color = TextPrimary,
                                         fontSize = 12.sp,
                                         fontWeight = FontWeight.Bold
                                     )
                                     Text(
-                                        text = "🔒 Snapshot Kilitli (Sabit Emirler)",
+                                        text = "🔒 Snapshot Kilitli (4 Aşamalı Rehber)",
                                         color = EmeraldProfitBright,
                                         fontSize = 9.sp,
                                         fontWeight = FontWeight.SemiBold
@@ -661,172 +669,477 @@ fun CryptoAnalystMasterApp() {
                             }
                         }
 
-                        // 1. 5-Minute Binance Candlestick Chart (with Yellow EMA9 & Cyan Bollinger Overlay)
-                        Surface(
-                            color = ObsidianBg,
-                            shape = RoundedCornerShape(10.dp),
-                            border = BorderStroke(1.dp, ObsidianBorder),
-                            modifier = Modifier.fillMaxWidth()
+                        // 4-AŞAMALI ADIM İLERLEME ÇUBUĞU (STEPPER WIZARD TABS)
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.spacedBy(4.dp)
                         ) {
-                            Column(modifier = Modifier.padding(8.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                                Row(
-                                    modifier = Modifier.fillMaxWidth(),
-                                    horizontalArrangement = Arrangement.SpaceBetween,
-                                    verticalAlignment = Alignment.CenterVertically
+                            listOf(
+                                AmbushWizardStep.STEP1_AMBUSH_WAITING to "1. Pusu",
+                                AmbushWizardStep.STEP2_INSIDE_DCA1_SETUP to "2. DCA 1",
+                                AmbushWizardStep.STEP3_CRISIS_DCA1_HIT to "3. Kriz",
+                                AmbushWizardStep.STEP4_FINAL_DEFENSE_DCA2_HIT to "4. Savunma"
+                            ).forEach { (step, label) ->
+                                val isCurrent = wizardStep == step
+                                val isPast = wizardStep.stepNumber > step.stepNumber
+                                Surface(
+                                    modifier = Modifier
+                                        .weight(1f)
+                                        .height(28.dp)
+                                        .clickable { wizardStep = step },
+                                    color = if (isCurrent) EmeraldProfit else if (isPast) EmeraldContainer else ObsidianCardElevated,
+                                    shape = RoundedCornerShape(6.dp),
+                                    border = BorderStroke(1.dp, if (isCurrent) EmeraldProfit else if (isPast) EmeraldProfit.copy(alpha = 0.5f) else ObsidianBorder)
                                 ) {
-                                    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                                    Box(contentAlignment = Alignment.Center) {
                                         Text(
-                                            text = "📊 5m Mumlar",
-                                            color = IceCyanBright,
-                                            fontSize = 10.5.sp,
-                                            fontWeight = FontWeight.Bold
+                                            text = if (isPast) "✓ $label" else label,
+                                            color = if (isCurrent) Color.Black else if (isPast) EmeraldProfitBright else TextTertiary,
+                                            fontSize = 9.5.sp,
+                                            fontWeight = if (isCurrent || isPast) FontWeight.ExtraBold else FontWeight.Medium,
+                                            fontFamily = FontFamily.Monospace
                                         )
-                                        Text("•", color = TextTertiary, fontSize = 10.sp)
-                                        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(3.dp)) {
-                                            Box(modifier = Modifier.size(6.dp).clip(CircleShape).background(GoldWarm))
-                                            Text("EMA9", color = GoldWarm, fontSize = 9.sp, fontWeight = FontWeight.Bold)
-                                        }
-                                        Text("•", color = TextTertiary, fontSize = 10.sp)
-                                        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(3.dp)) {
-                                            Box(modifier = Modifier.size(6.dp).clip(CircleShape).background(IceCyan))
-                                            Text("Bollinger", color = IceCyan, fontSize = 9.sp, fontWeight = FontWeight.Bold)
+                                    }
+                                }
+                            }
+                        }
+
+                        // STEP 1: DURUM 1 (PUSU BEKLEYİŞİ)
+                        if (wizardStep == AmbushWizardStep.STEP1_AMBUSH_WAITING) {
+                            Surface(
+                                color = ObsidianBg,
+                                shape = RoundedCornerShape(12.dp),
+                                border = BorderStroke(1.dp, EmeraldProfit.copy(alpha = 0.7f)),
+                                modifier = Modifier.fillMaxWidth()
+                            ) {
+                                Column(modifier = Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                                    Row(
+                                        modifier = Modifier.fillMaxWidth(),
+                                        horizontalArrangement = Arrangement.SpaceBetween,
+                                        verticalAlignment = Alignment.CenterVertically
+                                    ) {
+                                        Text(
+                                            text = "🎯 DURUM 1: PUSU BEKLEYİŞİ",
+                                            color = EmeraldProfitBright,
+                                            fontSize = 11.5.sp,
+                                            fontWeight = FontWeight.ExtraBold,
+                                            fontFamily = FontFamily.Monospace
+                                        )
+                                        Surface(color = EmeraldContainer, shape = RoundedCornerShape(4.dp)) {
+                                            Text("ADIM 1 / 4", color = EmeraldProfitBright, fontSize = 9.sp, fontWeight = FontWeight.Bold, modifier = Modifier.padding(horizontal = 5.dp, vertical = 2.dp))
                                         }
                                     }
-                                    val minC = asset.recentCandles.minOfOrNull { it.low } ?: snapshotCurrentPrice
-                                    val maxC = asset.recentCandles.maxOfOrNull { it.high } ?: snapshotCurrentPrice
-                                    Text(
-                                        text = "$${String.format(Locale.US, if (minC < 1.0) "%.4f" else "%.2f", minC)} - $${String.format(Locale.US, if (maxC < 1.0) "%.4f" else "%.2f", maxC)}",
-                                        color = TextTertiary,
-                                        fontSize = 8.5.sp,
-                                        fontFamily = FontFamily.Monospace
-                                    )
-                                }
 
-                                CandlestickChart(
-                                    candles = asset.recentCandles,
-                                    modifier = Modifier
-                                        .fillMaxWidth()
-                                        .height(130.dp),
-                                    isDetailed = true,
-                                    vwapPrice = tech?.vwap ?: asset.vwap,
-                                    enableGestures = true
-                                )
+                                    // Primary Giriş Fiyatı Kartı
+                                    Surface(
+                                        color = ObsidianCardElevated,
+                                        shape = RoundedCornerShape(10.dp),
+                                        border = BorderStroke(1.dp, EmeraldProfit)
+                                    ) {
+                                        Column(modifier = Modifier.padding(12.dp).fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                                            Text("🎯 1. KADEME ALIŞ FİYATI", color = EmeraldProfitBright, fontSize = 9.sp, fontWeight = FontWeight.ExtraBold, fontFamily = FontFamily.Monospace)
+                                            Row(
+                                                modifier = Modifier.fillMaxWidth(),
+                                                horizontalArrangement = Arrangement.SpaceBetween,
+                                                verticalAlignment = Alignment.CenterVertically
+                                            ) {
+                                                Text(
+                                                    text = "$${String.format(Locale.US, if (snapshotEntryPrice < 1.0) "%.4f" else "%.2f", snapshotEntryPrice)} USDT",
+                                                    color = Color.White,
+                                                    fontSize = 20.sp,
+                                                    fontWeight = FontWeight.ExtraBold,
+                                                    fontFamily = FontFamily.Monospace
+                                                )
+                                                IconButton(
+                                                    onClick = {
+                                                        val clip = android.content.ClipData.newPlainText("Price", String.format(Locale.US, if (snapshotEntryPrice < 1.0) "%.4f" else "%.2f", snapshotEntryPrice))
+                                                        clipboardManager?.setPrimaryClip(clip)
+                                                        Toast.makeText(context, "Fiyat Kopyalandı: $${String.format(Locale.US, if (snapshotEntryPrice < 1.0) "%.4f" else "%.2f", snapshotEntryPrice)}", Toast.LENGTH_SHORT).show()
+                                                    },
+                                                    modifier = Modifier.size(32.dp)
+                                                ) {
+                                                    Icon(Icons.Default.ContentCopy, contentDescription = "Kopyala", tint = IceCyanBright, modifier = Modifier.size(16.dp))
+                                                }
+                                            }
+                                        }
+                                    }
+
+                                    // Görev Talimatı
+                                    Surface(
+                                        color = ObsidianCard,
+                                        shape = RoundedCornerShape(8.dp),
+                                        border = BorderStroke(0.6.dp, ObsidianBorder)
+                                    ) {
+                                        Row(
+                                            modifier = Modifier.padding(10.dp),
+                                            verticalAlignment = Alignment.CenterVertically,
+                                            horizontalArrangement = Arrangement.spacedBy(8.dp)
+                                        ) {
+                                            Text("📢", fontSize = 16.sp)
+                                            Text(
+                                                text = "Midas'a girip bu fiyattan limit alış emri verin. Fiyat bu destek seviyesine indiğinde emriniz dolacaktır.",
+                                                color = TextPrimary,
+                                                fontSize = 11.sp,
+                                                lineHeight = 15.sp
+                                            )
+                                        }
+                                    }
+
+                                    // Aksiyon Butonu: İlk Alım Gerçekleşti
+                                    Button(
+                                        onClick = {
+                                            wizardStep = AmbushWizardStep.STEP2_INSIDE_DCA1_SETUP
+                                        },
+                                        colors = ButtonDefaults.buttonColors(containerColor = EmeraldProfit, contentColor = Color.Black),
+                                        shape = RoundedCornerShape(10.dp),
+                                        modifier = Modifier.fillMaxWidth().height(44.dp)
+                                    ) {
+                                        Text("✅ İlk Alım Gerçekleşti (İçerideyiz)", fontWeight = FontWeight.ExtraBold, fontSize = 12.5.sp)
+                                    }
+                                }
                             }
                         }
 
-                        // 2. DETAYLI AI MENTÖR RAPORU (Merkez Açıklama Kartı)
-                        Surface(
-                            color = ObsidianBg,
-                            shape = RoundedCornerShape(10.dp),
-                            border = BorderStroke(1.dp, GoldWarm.copy(alpha = 0.5f)),
-                            modifier = Modifier.fillMaxWidth()
-                        ) {
-                            Column(modifier = Modifier.padding(10.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                                    Text("🧠", fontSize = 13.sp)
-                                    Text(
-                                        text = "AI MENTÖR RAPORU & PUSU GEREKÇESİ",
-                                        color = GoldWarm,
-                                        fontSize = 10.5.sp,
-                                        fontWeight = FontWeight.ExtraBold,
-                                        fontFamily = FontFamily.Monospace
-                                    )
-                                }
-                                Text(
-                                    text = snapshotStrategyAnalysis.aiRecommendationReason,
-                                    color = TextPrimary.copy(alpha = 0.95f),
-                                    fontSize = 10.5.sp,
-                                    lineHeight = 15.sp
-                                )
-                            }
-                        }
-
-                        // 3. KİLİTLİ EMİR RAKAMLARI (MİDAS LİMİT GİRİŞ & HEDEF ÇIKIŞ)
-                        Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                        // STEP 2: DURUM 2 (İÇERİDEYİZ - DCA 1 KURULUMU)
+                        if (wizardStep == AmbushWizardStep.STEP2_INSIDE_DCA1_SETUP) {
                             Surface(
-                                modifier = Modifier.weight(1f),
-                                color = ObsidianCardElevated,
-                                shape = RoundedCornerShape(8.dp),
-                                border = BorderStroke(1.dp, EmeraldProfit.copy(alpha = 0.6f))
+                                color = ObsidianBg,
+                                shape = RoundedCornerShape(12.dp),
+                                border = BorderStroke(1.dp, IceCyanBright.copy(alpha = 0.7f)),
+                                modifier = Modifier.fillMaxWidth()
                             ) {
-                                Column(modifier = Modifier.padding(8.dp), verticalArrangement = Arrangement.spacedBy(2.dp)) {
-                                    Text("🎯 1. KADEME PUSU AL", color = EmeraldProfitBright, fontSize = 8.5.sp, fontWeight = FontWeight.ExtraBold, fontFamily = FontFamily.Monospace)
-                                    Text(
-                                        text = "$${String.format(Locale.US, if (snapshotEntryPrice < 1.0) "%.4f" else "%.2f", snapshotEntryPrice)}",
-                                        color = Color.White,
-                                        fontSize = 12.sp,
-                                        fontWeight = FontWeight.ExtraBold,
-                                        fontFamily = FontFamily.Monospace
-                                    )
-                                    Text("-%${String.format(Locale.US, "%.1f", snapshotRecommendedPlan.dropPercent)} Destek Seviyesi", color = EmeraldProfit, fontSize = 8.sp)
-                                }
-                            }
+                                Column(modifier = Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                                    Row(
+                                        modifier = Modifier.fillMaxWidth(),
+                                        horizontalArrangement = Arrangement.SpaceBetween,
+                                        verticalAlignment = Alignment.CenterVertically
+                                    ) {
+                                        Text(
+                                            text = "🟢 DURUM 2: İÇERİDEYİZ - DCA 1 KURULUMU",
+                                            color = IceCyanBright,
+                                            fontSize = 11.5.sp,
+                                            fontWeight = FontWeight.ExtraBold,
+                                            fontFamily = FontFamily.Monospace
+                                        )
+                                        Surface(color = IceCyanContainer, shape = RoundedCornerShape(4.dp)) {
+                                            Text("ADIM 2 / 4", color = IceCyanBright, fontSize = 9.sp, fontWeight = FontWeight.Bold, modifier = Modifier.padding(horizontal = 5.dp, vertical = 2.dp))
+                                        }
+                                    }
 
-                            Surface(
-                                modifier = Modifier.weight(1f),
-                                color = ObsidianCardElevated,
-                                shape = RoundedCornerShape(8.dp),
-                                border = BorderStroke(1.dp, GoldWarm.copy(alpha = 0.6f))
-                            ) {
-                                Column(modifier = Modifier.padding(8.dp), verticalArrangement = Arrangement.spacedBy(2.dp)) {
-                                    Text("🔴 HEDEF LİMİT SAT", color = GoldWarm, fontSize = 8.5.sp, fontWeight = FontWeight.ExtraBold, fontFamily = FontFamily.Monospace)
                                     Text(
-                                        text = "$${String.format(Locale.US, if (snapshotTargetExitPrice < 1.0) "%.4f" else "%.2f", snapshotTargetExitPrice)}",
-                                        color = Color.White,
-                                        fontSize = 12.sp,
-                                        fontWeight = FontWeight.ExtraBold,
-                                        fontFamily = FontFamily.Monospace
+                                        text = "Midas'a şu iki emri gir:",
+                                        color = TextPrimary,
+                                        fontSize = 11.5.sp,
+                                        fontWeight = FontWeight.ExtraBold
                                     )
-                                    Text("+%1.0 Net (Komisyon Dahil)", color = EmeraldProfitBright, fontSize = 8.sp, fontWeight = FontWeight.Bold)
-                                }
-                            }
 
-                            Surface(
-                                modifier = Modifier.weight(1f),
-                                color = ObsidianCardElevated,
-                                shape = RoundedCornerShape(8.dp),
-                                border = BorderStroke(1.dp, IceCyanBright.copy(alpha = 0.5f))
-                            ) {
-                                Column(modifier = Modifier.padding(8.dp), verticalArrangement = Arrangement.spacedBy(2.dp)) {
-                                    Text("⏱️ PUSU SÜRESİ", color = IceCyanBright, fontSize = 8.5.sp, fontWeight = FontWeight.ExtraBold, fontFamily = FontFamily.Monospace)
-                                    Text("${snapshotTimeout} Dk", color = Color.White, fontSize = 12.sp, fontWeight = FontWeight.ExtraBold, fontFamily = FontFamily.Monospace)
-                                    Text("Tahta: %${String.format(Locale.US, "%.0f", buyerRatio)} Alıcı", color = TextSecondary, fontSize = 8.sp)
+                                    // 2 Emir Kutuları: Kâr Çıkışı + 2. Kademe Savunma Alışı
+                                    Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                                        // Emir 1: Kâr Çıkışı (Take Profit)
+                                        Surface(
+                                            modifier = Modifier.weight(1f),
+                                            color = ObsidianCardElevated,
+                                            shape = RoundedCornerShape(10.dp),
+                                            border = BorderStroke(1.dp, GoldWarm)
+                                        ) {
+                                            Column(modifier = Modifier.padding(10.dp), verticalArrangement = Arrangement.spacedBy(3.dp)) {
+                                                Text("🔴 1) KÂR ÇIKIŞI (LİMİT SAT)", color = GoldWarm, fontSize = 8.5.sp, fontWeight = FontWeight.ExtraBold, fontFamily = FontFamily.Monospace)
+                                                Text(
+                                                    text = "$${String.format(Locale.US, if (wizardState.targetExitPrice < 1.0) "%.4f" else "%.2f", wizardState.targetExitPrice)}",
+                                                    color = Color.White,
+                                                    fontSize = 14.sp,
+                                                    fontWeight = FontWeight.ExtraBold,
+                                                    fontFamily = FontFamily.Monospace
+                                                )
+                                                Text("+%1.0 Net Kâr Hedefi", color = EmeraldProfitBright, fontSize = 8.sp, fontWeight = FontWeight.Bold)
+                                            }
+                                        }
+
+                                        // Emir 2: 2. Kademe (DCA 1) Savunma Alışı
+                                        Surface(
+                                            modifier = Modifier.weight(1f),
+                                            color = ObsidianCardElevated,
+                                            shape = RoundedCornerShape(10.dp),
+                                            border = BorderStroke(1.dp, IceCyanBright)
+                                        ) {
+                                            Column(modifier = Modifier.padding(10.dp), verticalArrangement = Arrangement.spacedBy(3.dp)) {
+                                                Text("🛡️ 2) 2. KADEME (LİMİT AL)", color = IceCyanBright, fontSize = 8.5.sp, fontWeight = FontWeight.ExtraBold, fontFamily = FontFamily.Monospace)
+                                                Text(
+                                                    text = "$${String.format(Locale.US, if (snapshotTier2Price < 1.0) "%.4f" else "%.2f", snapshotTier2Price)}",
+                                                    color = Color.White,
+                                                    fontSize = 14.sp,
+                                                    fontWeight = FontWeight.ExtraBold,
+                                                    fontFamily = FontFamily.Monospace
+                                                )
+                                                Text("%1 Düşüşte Savunma", color = IceCyanBright, fontSize = 8.sp)
+                                            }
+                                        }
+                                    }
+
+                                    // Butonlar: 2. Kademe Alındı (DCA 1 Vurdu) & Kâr ile Satıldı
+                                    Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                                        Button(
+                                            onClick = {
+                                                wizardStep = AmbushWizardStep.STEP3_CRISIS_DCA1_HIT
+                                            },
+                                            colors = ButtonDefaults.buttonColors(containerColor = GoldWarm, contentColor = Color.Black),
+                                            shape = RoundedCornerShape(10.dp),
+                                            modifier = Modifier.weight(1.2f).height(44.dp)
+                                        ) {
+                                            Text("⚠️ 2. Kademe Alındı", fontWeight = FontWeight.ExtraBold, fontSize = 11.5.sp)
+                                        }
+
+                                        OutlinedButton(
+                                            onClick = {
+                                                Toast.makeText(context, "🎉 Tebrikler! Hedef fiyattan kârla çıkış yapıldı.", Toast.LENGTH_LONG).show()
+                                                selectedAssetDetails = null
+                                            },
+                                            colors = ButtonDefaults.outlinedButtonColors(contentColor = EmeraldProfitBright),
+                                            border = BorderStroke(1.dp, EmeraldProfit),
+                                            shape = RoundedCornerShape(10.dp),
+                                            modifier = Modifier.weight(0.9f).height(44.dp)
+                                        ) {
+                                            Text("🎉 Kârla Satıldı", fontWeight = FontWeight.Bold, fontSize = 11.sp)
+                                        }
+                                    }
                                 }
                             }
                         }
 
-                        // 4. KADEMELİ SAVUNMA KARTLARI (DCA 2 & 3)
-                        Surface(
-                            color = ObsidianBg,
-                            shape = RoundedCornerShape(8.dp),
-                            border = BorderStroke(0.6.dp, ObsidianBorder),
-                            modifier = Modifier.fillMaxWidth()
-                        ) {
-                            Row(
-                                modifier = Modifier.padding(horizontal = 8.dp, vertical = 6.dp).fillMaxWidth(),
-                                horizontalArrangement = Arrangement.SpaceBetween,
-                                verticalAlignment = Alignment.CenterVertically
+                        // STEP 3: DURUM 3 (KRİZ YÖNETİMİ - 2. KADEME VURDU)
+                        if (wizardStep == AmbushWizardStep.STEP3_CRISIS_DCA1_HIT) {
+                            Surface(
+                                color = ObsidianBg,
+                                shape = RoundedCornerShape(12.dp),
+                                border = BorderStroke(1.2.dp, GoldWarm),
+                                modifier = Modifier.fillMaxWidth()
                             ) {
-                                Text("🛡️ DCA Savunma:", color = TextSecondary, fontSize = 9.sp, fontWeight = FontWeight.Bold)
-                                Text("2. Kademe: $${String.format(Locale.US, if (snapshotTier2Price < 1.0) "%.4f" else "%.2f", snapshotTier2Price)}", color = IceCyanBright, fontSize = 9.sp, fontFamily = FontFamily.Monospace)
-                                Text("3. Kademe: $${String.format(Locale.US, if (snapshotTier3Price < 1.0) "%.4f" else "%.2f", snapshotTier3Price)}", color = GoldWarm, fontSize = 9.sp, fontFamily = FontFamily.Monospace)
+                                Column(modifier = Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                                    Row(
+                                        modifier = Modifier.fillMaxWidth(),
+                                        horizontalArrangement = Arrangement.SpaceBetween,
+                                        verticalAlignment = Alignment.CenterVertically
+                                    ) {
+                                        Text(
+                                            text = "🚨 DURUM 3: KRİZ YÖNETİMİ",
+                                            color = GoldWarm,
+                                            fontSize = 11.5.sp,
+                                            fontWeight = FontWeight.ExtraBold,
+                                            fontFamily = FontFamily.Monospace
+                                        )
+                                        Surface(color = GoldContainer, shape = RoundedCornerShape(4.dp)) {
+                                            Text("ADIM 3 / 4", color = GoldWarm, fontSize = 9.sp, fontWeight = FontWeight.Bold, modifier = Modifier.padding(horizontal = 5.dp, vertical = 2.dp))
+                                        }
+                                    }
+
+                                    // KRİTİK UYARI VE MALİYET DÜŞÜŞ BİLGİSİ
+                                    Surface(
+                                        color = GoldWarm.copy(alpha = 0.12f),
+                                        shape = RoundedCornerShape(8.dp),
+                                        border = BorderStroke(1.dp, GoldWarm)
+                                    ) {
+                                        Column(modifier = Modifier.padding(10.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                                            Text(
+                                                text = "🚨 DİKKAT! Midas'taki eski satış emrini İPTAL ET.",
+                                                color = GoldWarm,
+                                                fontSize = 11.sp,
+                                                fontWeight = FontWeight.ExtraBold
+                                            )
+                                            Text(
+                                                text = "Yeni Ortalama Maliyetimiz düştü: $${String.format(Locale.US, if (wizardState.averageCost < 1.0) "%.4f" else "%.2f", wizardState.averageCost)}\nYeni Kâr Çıkışı hedefin budur: $${String.format(Locale.US, if (wizardState.targetExitPrice < 1.0) "%.4f" else "%.2f", wizardState.targetExitPrice)}",
+                                                color = TextPrimary,
+                                                fontSize = 10.5.sp,
+                                                lineHeight = 14.sp
+                                            )
+                                        }
+                                    }
+
+                                    // 2 Yeni Emir Kutusu: Yeni Düşük Satış Hedefi + 3. Kademe Savunma Alışı
+                                    Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                                        // Yeni Kâr Çıkışı
+                                        Surface(
+                                            modifier = Modifier.weight(1f),
+                                            color = ObsidianCardElevated,
+                                            shape = RoundedCornerShape(10.dp),
+                                            border = BorderStroke(1.dp, EmeraldProfit)
+                                        ) {
+                                            Column(modifier = Modifier.padding(10.dp), verticalArrangement = Arrangement.spacedBy(3.dp)) {
+                                                Text("🔴 YENİ KÂR ÇIKIŞI (LİMİT SAT)", color = EmeraldProfitBright, fontSize = 8.sp, fontWeight = FontWeight.ExtraBold, fontFamily = FontFamily.Monospace)
+                                                Text(
+                                                    text = "$${String.format(Locale.US, if (wizardState.targetExitPrice < 1.0) "%.4f" else "%.2f", wizardState.targetExitPrice)}",
+                                                    color = Color.White,
+                                                    fontSize = 14.sp,
+                                                    fontWeight = FontWeight.ExtraBold,
+                                                    fontFamily = FontFamily.Monospace
+                                                )
+                                                Text("Maliyet Düştü: $${String.format(Locale.US, if (wizardState.averageCost < 1.0) "%.4f" else "%.2f", wizardState.averageCost)}", color = EmeraldProfit, fontSize = 8.sp)
+                                            }
+                                        }
+
+                                        // 3. Kademe (DCA 2) Savunma Alışı
+                                        Surface(
+                                            modifier = Modifier.weight(1f),
+                                            color = ObsidianCardElevated,
+                                            shape = RoundedCornerShape(10.dp),
+                                            border = BorderStroke(1.dp, GoldWarm)
+                                        ) {
+                                            Column(modifier = Modifier.padding(10.dp), verticalArrangement = Arrangement.spacedBy(3.dp)) {
+                                                Text("🛡️ 3. KADEME (LİMİT AL)", color = GoldWarm, fontSize = 8.sp, fontWeight = FontWeight.ExtraBold, fontFamily = FontFamily.Monospace)
+                                                Text(
+                                                    text = "$${String.format(Locale.US, if (snapshotTier3Price < 1.0) "%.4f" else "%.2f", snapshotTier3Price)}",
+                                                    color = Color.White,
+                                                    fontSize = 14.sp,
+                                                    fontWeight = FontWeight.ExtraBold,
+                                                    fontFamily = FontFamily.Monospace
+                                                )
+                                                Text("%2 Altı Savunma", color = GoldWarm, fontSize = 8.sp)
+                                            }
+                                        }
+                                    }
+
+                                    // Butonlar: 3. Kademe Alındı & Yeni Hedefte Satıldı
+                                    Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                                        Button(
+                                            onClick = {
+                                                wizardStep = AmbushWizardStep.STEP4_FINAL_DEFENSE_DCA2_HIT
+                                            },
+                                            colors = ButtonDefaults.buttonColors(containerColor = CoralRed, contentColor = Color.White),
+                                            shape = RoundedCornerShape(10.dp),
+                                            modifier = Modifier.weight(1.2f).height(44.dp)
+                                        ) {
+                                            Text("⚠️ 3. Kademe Alındı", fontWeight = FontWeight.ExtraBold, fontSize = 11.5.sp)
+                                        }
+
+                                        OutlinedButton(
+                                            onClick = {
+                                                Toast.makeText(context, "🎉 Tebrikler! 2. kademe krizinden kârla çıkıldı.", Toast.LENGTH_LONG).show()
+                                                selectedAssetDetails = null
+                                            },
+                                            colors = ButtonDefaults.outlinedButtonColors(contentColor = EmeraldProfitBright),
+                                            border = BorderStroke(1.dp, EmeraldProfit),
+                                            shape = RoundedCornerShape(10.dp),
+                                            modifier = Modifier.weight(0.9f).height(44.dp)
+                                        ) {
+                                            Text("🎉 Yeni Hedefte Satıldı", fontWeight = FontWeight.Bold, fontSize = 10.sp)
+                                        }
+                                    }
+                                }
                             }
                         }
 
-                        // Action Button: Pusuyu Başlat and Bütçe Ayır
-                        Button(
-                            onClick = {
-                                val target = asset
-                                selectedAssetDetails = null
-                                showBudgetDialogForAsset = target
-                            },
-                            colors = ButtonDefaults.buttonColors(containerColor = EmeraldProfit, contentColor = Color.Black),
-                            shape = RoundedCornerShape(10.dp),
-                            modifier = Modifier.fillMaxWidth().height(44.dp)
-                        ) {
-                            Icon(Icons.Default.Shield, contentDescription = null, modifier = Modifier.size(16.dp))
-                            Spacer(modifier = Modifier.width(6.dp))
-                            Text("🎯 Midas'ta Pusu Aç & Bütçe Ayır (+%1.0 Net)", fontWeight = FontWeight.ExtraBold, fontSize = 12.5.sp)
+                        // STEP 4: DURUM 4 (SON SAVUNMA HATTI - 3. KADEME DOLDU)
+                        if (wizardStep == AmbushWizardStep.STEP4_FINAL_DEFENSE_DCA2_HIT) {
+                            Surface(
+                                color = ObsidianBg,
+                                shape = RoundedCornerShape(12.dp),
+                                border = BorderStroke(1.2.dp, CoralRed),
+                                modifier = Modifier.fillMaxWidth()
+                            ) {
+                                Column(modifier = Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                                    Row(
+                                        modifier = Modifier.fillMaxWidth(),
+                                        horizontalArrangement = Arrangement.SpaceBetween,
+                                        verticalAlignment = Alignment.CenterVertically
+                                    ) {
+                                        Text(
+                                            text = "🛡️ DURUM 4: SON SAVUNMA HATTI",
+                                            color = CoralRed,
+                                            fontSize = 11.5.sp,
+                                            fontWeight = FontWeight.ExtraBold,
+                                            fontFamily = FontFamily.Monospace
+                                        )
+                                        Surface(color = CoralRed.copy(alpha = 0.2f), shape = RoundedCornerShape(4.dp)) {
+                                            Text("ADIM 4 / 4", color = CoralRed, fontSize = 9.sp, fontWeight = FontWeight.Bold, modifier = Modifier.padding(horizontal = 5.dp, vertical = 2.dp))
+                                        }
+                                    }
+
+                                    // KRİTİK SON SAVUNMA VE SIFIR ZARAR AÇIKLAMASI
+                                    Surface(
+                                        color = CoralRed.copy(alpha = 0.12f),
+                                        shape = RoundedCornerShape(8.dp),
+                                        border = BorderStroke(1.dp, CoralRed)
+                                    ) {
+                                        Column(modifier = Modifier.padding(10.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                                            Text(
+                                                text = "🚨 Son kademe doldu! Eski satışı İPTAL ET ve anında şu yeni düşük hedefe satış emri gir.",
+                                                color = CoralRed,
+                                                fontSize = 11.sp,
+                                                fontWeight = FontWeight.ExtraBold
+                                            )
+                                            Text(
+                                                text = "Maksimum 3 kademe kuralı devrede. Başka ilave alım yapılmaz. Spot piyasada likidasyon riski yoktur; sıfır zarar ve spot sabır kuralıyla fiyata dönmesi bekleniyor.",
+                                                color = TextPrimary,
+                                                fontSize = 10.sp,
+                                                lineHeight = 14.sp
+                                            )
+                                        }
+                                    }
+
+                                    // Son Ortalama Maliyet ve Son Kâr Çıkış Hedefi Kartı
+                                    Surface(
+                                        color = ObsidianCardElevated,
+                                        shape = RoundedCornerShape(10.dp),
+                                        border = BorderStroke(1.dp, EmeraldProfit)
+                                    ) {
+                                        Column(modifier = Modifier.padding(12.dp).fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                                            Row(
+                                                modifier = Modifier.fillMaxWidth(),
+                                                horizontalArrangement = Arrangement.SpaceBetween
+                                            ) {
+                                                Text("📉 Son Ortalama Maliyet:", color = TextSecondary, fontSize = 10.5.sp)
+                                                Text(
+                                                    text = "$${String.format(Locale.US, if (wizardState.averageCost < 1.0) "%.4f" else "%.2f", wizardState.averageCost)}",
+                                                    color = TextPrimary,
+                                                    fontSize = 11.5.sp,
+                                                    fontWeight = FontWeight.Bold,
+                                                    fontFamily = FontFamily.Monospace
+                                                )
+                                            }
+                                            Row(
+                                                modifier = Modifier.fillMaxWidth(),
+                                                horizontalArrangement = Arrangement.SpaceBetween,
+                                                verticalAlignment = Alignment.CenterVertically
+                                            ) {
+                                                Text("🔴 YENİ DÜŞÜK SATIŞ HEDEFİ:", color = EmeraldProfitBright, fontSize = 11.sp, fontWeight = FontWeight.ExtraBold)
+                                                Text(
+                                                    text = "$${String.format(Locale.US, if (wizardState.targetExitPrice < 1.0) "%.4f" else "%.2f", wizardState.targetExitPrice)}",
+                                                    color = Color.White,
+                                                    fontSize = 16.sp,
+                                                    fontWeight = FontWeight.ExtraBold,
+                                                    fontFamily = FontFamily.Monospace
+                                                )
+                                            }
+                                        }
+                                    }
+
+                                    // Aksiyon Butonları
+                                    Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                                        Button(
+                                            onClick = {
+                                                Toast.makeText(context, "🎉 Tebrikler! 3. kademeden sonra tüm sermaye kârla kurtarıldı.", Toast.LENGTH_LONG).show()
+                                                selectedAssetDetails = null
+                                            },
+                                            colors = ButtonDefaults.buttonColors(containerColor = EmeraldProfit, contentColor = Color.Black),
+                                            shape = RoundedCornerShape(10.dp),
+                                            modifier = Modifier.weight(1.2f).height(44.dp)
+                                        ) {
+                                            Text("🎉 Son Hedefte Satıldı (Kârla Tamamlandı)", fontWeight = FontWeight.ExtraBold, fontSize = 11.sp)
+                                        }
+
+                                        OutlinedButton(
+                                            onClick = {
+                                                wizardStep = AmbushWizardStep.STEP1_AMBUSH_WAITING
+                                            },
+                                            colors = ButtonDefaults.outlinedButtonColors(contentColor = IceCyanBright),
+                                            border = BorderStroke(1.dp, IceCyanBright),
+                                            shape = RoundedCornerShape(10.dp),
+                                            modifier = Modifier.weight(0.8f).height(44.dp)
+                                        ) {
+                                            Text("🔄 Başa Dön", fontWeight = FontWeight.Bold, fontSize = 11.sp)
+                                        }
+                                    }
+                                }
+                            }
                         }
                     }
                 }
@@ -3551,6 +3864,30 @@ fun LiveAssistantScreen(
                         }
 
                         // Target Coin & Current Price Banner
+                        if (target.isAmbushPaused) {
+                            Surface(
+                                color = CoralRed.copy(alpha = 0.15f),
+                                shape = RoundedCornerShape(8.dp),
+                                border = BorderStroke(1.dp, CoralRed)
+                            ) {
+                                Row(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .padding(8.dp),
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.spacedBy(6.dp)
+                                ) {
+                                    Text("🚨", fontSize = 14.sp)
+                                    Text(
+                                        text = "BTC 5m Düşüş Filtresi Aktif: Altcoin pusu sinyalleri geçici olarak duraklatıldı.",
+                                        color = CoralRed,
+                                        fontSize = 10.5.sp,
+                                        fontWeight = FontWeight.Bold
+                                    )
+                                }
+                            }
+                        }
+
                         Row(
                             modifier = Modifier.fillMaxWidth(),
                             horizontalArrangement = Arrangement.SpaceBetween,
@@ -3735,7 +4072,7 @@ fun LiveAssistantScreen(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.spacedBy(6.dp)
             ) {
-                listOf("ALL" to "Tümü", "BTC" to "BTC", "ETH" to "ETH", "BNB" to "BNB", "LINK" to "LINK", "AVAX" to "AVAX").forEach { (code, label) ->
+                listOf("ALL" to "Tümü", "ETH" to "ETH", "AVAX" to "AVAX", "LINK" to "LINK").forEach { (code, label) ->
                     val isSelected = selectedFilter == code
                     Surface(
                         modifier = Modifier

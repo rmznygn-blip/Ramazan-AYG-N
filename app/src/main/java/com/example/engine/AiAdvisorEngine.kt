@@ -832,8 +832,56 @@ object AiAdvisorEngine {
     }
 
     /**
-     * Taranan tüm coinleri (BTC, ETH, BNB, LINK, AVAX) anlık teknik metriklerle (VWAP, RSI, Alıcı Duvarı, Hacim)
+     * BTC 5 dakikalık grafiğini arka planda inceleyerek genel piyasa yönünü ve çöküş filtresini belirler.
+     * BTC sert düşüyorsa altcoinlerde pusu sinyali geçici olarak durdurulur.
+     */
+    fun evaluateMarketTrend(
+        techMap: Map<String, TechnicalAnalysis5m>,
+        oracleMap: Map<String, BinanceOracleData>
+    ): MarketTrendStatus {
+        val btcTech = techMap["BTC"]
+        val btcOracle = oracleMap["BTC"]
+        val btcPrice = btcOracle?.binanceGlobalPrice ?: (btcTech?.currentPrice ?: 0.0)
+        val btcRsi = btcTech?.rsi14 ?: 50.0
+        val ema9 = btcTech?.ema9 ?: btcPrice
+
+        // BTC 5m sert düşüş tespiti (RSI < 34 veya EMA9 altı sert düşüş)
+        val isDumping = (btcRsi < 34.0 && btcPrice < ema9 * 0.998) || (btcPrice > 0 && ema9 > 0 && btcPrice < ema9 * 0.993)
+
+        return if (isDumping) {
+            MarketTrendStatus(
+                regime = MarketTrendRegime.DUMP_WARNING,
+                btcPrice = btcPrice,
+                btcRsi = btcRsi,
+                title = "🚨 BTC 5m Grafiğinde Sert Düşüş Var!",
+                warningMessage = "BTC 5 dakikalık grafikte sert satış baskısında (RSI: ${String.format(Locale.US, "%.0f", btcRsi)}). Altcoinlerde pusu sinyalleri risk önleme amacıyla geçici olarak durduruldu.",
+                isAmbushSafe = false
+            )
+        } else if (btcRsi >= 54.0 || (btcPrice >= ema9 && (btcTech?.isSupportBounceValid == true || btcRsi >= 48.0))) {
+            MarketTrendStatus(
+                regime = MarketTrendRegime.BULLISH_SAFE,
+                btcPrice = btcPrice,
+                btcRsi = btcRsi,
+                title = "🟢 BTC Trendi Güçlü (Pusu Aktif)",
+                warningMessage = null,
+                isAmbushSafe = true
+            )
+        } else {
+            MarketTrendStatus(
+                regime = MarketTrendRegime.NEUTRAL_RANGE,
+                btcPrice = btcPrice,
+                btcRsi = btcRsi,
+                title = "⚖️ BTC Yatay Denge (Normal Pusu)",
+                warningMessage = null,
+                isAmbushSafe = true
+            )
+        }
+    }
+
+    /**
+     * Taranan yüksek volatiliteli coinleri (ETH, AVAX, LINK) anlık teknik metriklerle (VWAP, RSI, Alıcı Duvarı, Hacim)
      * puanlayarak piyasadaki tekil 1 numaralı "En İyi Pusu Hedefi"ni (Master Target) seçer.
+     * BTC'yi pusu hedefi olarak göstermez; BTC sadece arka plan trend filtresidir.
      */
     fun findMasterAmbushTarget(
         assets: List<CryptoAsset>,
@@ -841,9 +889,13 @@ object AiAdvisorEngine {
         techMap: Map<String, TechnicalAnalysis5m>,
         capitalProfile: CapitalProfileEntity? = null
     ): MasterAmbushTarget? {
-        if (assets.isEmpty()) return null
+        // Sadece ETH, AVAX, LINK taranır
+        val eligibleAssets = assets.filter { it.symbol in listOf("ETH", "AVAX", "LINK") }
+        if (eligibleAssets.isEmpty()) return null
 
-        val scoredTargets = assets.mapNotNull { asset ->
+        val marketTrend = evaluateMarketTrend(techMap, oracleMap)
+
+        val scoredTargets = eligibleAssets.mapNotNull { asset ->
             val oracle = oracleMap[asset.symbol]
             val tech = techMap[asset.symbol]
             val currentPrice = if (asset.rawPrice > 0) asset.rawPrice else (oracle?.binanceGlobalPrice ?: 0.0)
@@ -947,10 +999,14 @@ object AiAdvisorEngine {
             val tier3Price = entryPrice * 0.98 // 3. Kademe = 1. Kademe * 0.98
             val dropPercent = (((currentPrice - entryPrice) / currentPrice) * 100.0).coerceAtLeast(0.15)
 
-            val reason = buildString {
-                append("Tüm piyasa tarandı; ${asset.symbol} anlık olarak ")
-                if (currentPrice < vwap) append("VWAP altı dip bölgede ") else append("kurumsal ortalama üzerinde ")
-                append("ve %$bidPct alıcı derinliği ile şu anki en yüksek matematiksel potansiyele sahip.")
+            val reason = if (!marketTrend.isAmbushSafe) {
+                "🚨 DİKKAT: BTC 5 dakikalık grafikte sert düşüşte olduğu için altcoin pusu sinyali geçici olarak askıya alınmıştır. Piyasanın yataylaşması bekleniyor."
+            } else {
+                buildString {
+                    append("Elit av havuzu (ETH, AVAX, LINK) tarandı; ${asset.symbol} anlık olarak ")
+                    if (currentPrice < vwap) append("VWAP altı dip bölgede ") else append("kurumsal ortalama üzerinde ")
+                    append("ve %$bidPct alıcı derinliği ile şu anki en yüksek matematiksel potansiyele sahip.")
+                }
             }
 
             MasterAmbushTarget(
@@ -967,13 +1023,134 @@ object AiAdvisorEngine {
                 rsi = rsi,
                 vwap = vwap,
                 aiReason = reason,
-                scoreHighlights = highlights
+                scoreHighlights = highlights,
+                marketTrendStatus = marketTrend,
+                isAmbushPaused = !marketTrend.isAmbushSafe
             )
         }
 
         return scoredTargets.maxByOrNull { it.opportunityScore }
     }
+
+    /**
+     * 4 Aşamalı Dinamik Durum Makinesi (State Machine) Hesaplayıcısı
+     */
+    fun computeWizardState(
+        step: AmbushWizardStep,
+        symbol: String,
+        baseEntryPrice: Double,
+        currentPrice: Double
+    ): WizardCalculationResult {
+        val p1 = baseEntryPrice
+        val p2 = baseEntryPrice * 0.99
+        val p3 = baseEntryPrice * 0.98
+
+        val format = { v: Double ->
+            if (v < 1.0) String.format(Locale.US, "%.4f", v) else String.format(Locale.US, "%.2f", v)
+        }
+
+        return when (step) {
+            AmbushWizardStep.STEP1_AMBUSH_WAITING -> {
+                val targetExit = p1 * 1.01
+                WizardCalculationResult(
+                    step = step,
+                    symbol = symbol,
+                    entryPrice = p1,
+                    currentPrice = currentPrice,
+                    averageCost = p1,
+                    targetExitPrice = targetExit,
+                    nextDcaBuyPrice = null,
+                    missionInstruction = "Midas Kripto'ya girin ve ${symbol}/USDT için $${format(p1)} fiyatından Limit Alış emri verin.",
+                    alertWarning = null,
+                    isFinalTier = false
+                )
+            }
+            AmbushWizardStep.STEP2_INSIDE_DCA1_SETUP -> {
+                val avgCost = p1
+                val targetExit = p1 * 1.01
+                WizardCalculationResult(
+                    step = step,
+                    symbol = symbol,
+                    entryPrice = p1,
+                    currentPrice = currentPrice,
+                    averageCost = avgCost,
+                    targetExitPrice = targetExit,
+                    nextDcaBuyPrice = p2,
+                    missionInstruction = "Midas'a şu iki emri gir:\n1) Kâr Çıkışı (Take Profit): $${format(targetExit)} (+%1.0 Kâr)\n2) 2. Kademe (DCA 1) Savunma Alışı: $${format(p2)} (%1 Altı)",
+                    alertWarning = null,
+                    isFinalTier = false
+                )
+            }
+            AmbushWizardStep.STEP3_CRISIS_DCA1_HIT -> {
+                val avgCost = (p1 + p2) / 2.0 // Ortalama Maliyet Düştü
+                val targetExit = avgCost * 1.01
+                WizardCalculationResult(
+                    step = step,
+                    symbol = symbol,
+                    entryPrice = p1,
+                    currentPrice = currentPrice,
+                    averageCost = avgCost,
+                    targetExitPrice = targetExit,
+                    nextDcaBuyPrice = p3,
+                    missionInstruction = "🚨 DİKKAT! Midas'taki eski satış emrini İPTAL ET.\nYeni Ortalama Maliyetimiz düştü: $${format(avgCost)}\nYeni Kâr Çıkışı hedefin budur: $${format(targetExit)} (Yeni %1 Kâr Limit Satış)\nAyrıca Midas'a 3. Kademe (DCA 2) savunma alışı girin: $${format(p3)} (%2 Altı)",
+                    alertWarning = "🚨 2. Kademe doldu! Eski satış emrini Midas'ta derhal iptal edip hemen yeni $${format(targetExit)} hedefine satış emri bağlayın.",
+                    isFinalTier = false
+                )
+            }
+            AmbushWizardStep.STEP4_FINAL_DEFENSE_DCA2_HIT -> {
+                val avgCost = (p1 + p2 + p3) / 3.0 // 3 kademenin son ortalama maliyeti
+                val targetExit = avgCost * 1.01
+                WizardCalculationResult(
+                    step = step,
+                    symbol = symbol,
+                    entryPrice = p1,
+                    currentPrice = currentPrice,
+                    averageCost = avgCost,
+                    targetExitPrice = targetExit,
+                    nextDcaBuyPrice = null,
+                    missionInstruction = "🚨 Son kademe doldu! Başka ekleme yapılmayacak.\nMidas'taki eski satışı İPTAL ET ve anında şu yeni düşük hedefe satış emri gir: $${format(targetExit)}.\nSpot piyasada likidasyon riski yoktur; sıfır zarar ve spot sabır kuralıyla bekleniyor.",
+                    alertWarning = "🚨 3. Kademe doldu! 3/3 kademe tamamlandı. Eski satışı iptal edip hemen $${format(targetExit)} limit satışını girin ve sabırla bekleyin.",
+                    isFinalTier = true
+                )
+            }
+        }
+    }
 }
+
+enum class MarketTrendRegime {
+    BULLISH_SAFE,
+    NEUTRAL_RANGE,
+    DUMP_WARNING
+}
+
+data class MarketTrendStatus(
+    val regime: MarketTrendRegime,
+    val btcPrice: Double,
+    val btcRsi: Double,
+    val title: String,
+    val warningMessage: String?,
+    val isAmbushSafe: Boolean
+)
+
+enum class AmbushWizardStep(val stepNumber: Int, val title: String) {
+    STEP1_AMBUSH_WAITING(1, "1. Pusu Bekleyişi"),
+    STEP2_INSIDE_DCA1_SETUP(2, "2. İçerideyiz (DCA 1)"),
+    STEP3_CRISIS_DCA1_HIT(3, "3. Kriz Yönetimi (DCA 2)"),
+    STEP4_FINAL_DEFENSE_DCA2_HIT(4, "4. Son Savunma")
+}
+
+data class WizardCalculationResult(
+    val step: AmbushWizardStep,
+    val symbol: String,
+    val entryPrice: Double,
+    val currentPrice: Double,
+    val averageCost: Double,
+    val targetExitPrice: Double,
+    val nextDcaBuyPrice: Double?,
+    val missionInstruction: String,
+    val alertWarning: String?,
+    val isFinalTier: Boolean
+)
 
 data class MasterAmbushTarget(
     val asset: CryptoAsset,
@@ -989,7 +1166,9 @@ data class MasterAmbushTarget(
     val rsi: Double,
     val vwap: Double,
     val aiReason: String,
-    val scoreHighlights: List<String>
+    val scoreHighlights: List<String>,
+    val marketTrendStatus: MarketTrendStatus? = null,
+    val isAmbushPaused: Boolean = false
 )
 
 enum class SmartEntryType {

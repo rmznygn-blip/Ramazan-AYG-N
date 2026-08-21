@@ -36,15 +36,15 @@ object CryptoMarketRepository {
     private var restPollingJob: Job? = null
     private var wsSyncJob: Job? = null
 
-    // Tracked Major Crypto Pairs on Midas & Binance (Elite 5 Scalping Majors)
-    val MONITORED_SYMBOLS = listOf("BTC", "ETH", "BNB", "LINK", "AVAX")
+    // Tracked Trading Pairs on Midas & Binance (Elite 3 Scalping Majors: ETH, AVAX, LINK)
+    val TRADING_SYMBOLS = listOf("ETH", "AVAX", "LINK")
+    // All Monitored symbols including BTC for Market Direction / Trend Filtering
+    val MONITORED_SYMBOLS = listOf("BTC", "ETH", "AVAX", "LINK")
 
     private val initialAssets = listOf(
-        CryptoAsset(id = "BTC", symbol = "BTC", name = "Bitcoin", priceFormatted = "$0.00", rawPrice = 0.0, currencySymbol = "$", changePercent = 0.0, changeFormatted = "0.00%", isPositive = true, sparklinePoints = listOf(50f, 50f, 50f, 50f, 50f), sourceApp = "Midas Kripto", binanceReferencePrice = 0.0, leadLagDiffPercent = 0.0),
         CryptoAsset(id = "ETH", symbol = "ETH", name = "Ethereum", priceFormatted = "$0.00", rawPrice = 0.0, currencySymbol = "$", changePercent = 0.0, changeFormatted = "0.00%", isPositive = true, sparklinePoints = listOf(50f, 50f, 50f, 50f, 50f), sourceApp = "Midas Kripto", binanceReferencePrice = 0.0, leadLagDiffPercent = 0.0),
-        CryptoAsset(id = "BNB", symbol = "BNB", name = "BNB", priceFormatted = "$0.00", rawPrice = 0.0, currencySymbol = "$", changePercent = 0.0, changeFormatted = "0.00%", isPositive = true, sparklinePoints = listOf(50f, 50f, 50f, 50f, 50f), sourceApp = "Midas Kripto", binanceReferencePrice = 0.0, leadLagDiffPercent = 0.0),
-        CryptoAsset(id = "LINK", symbol = "LINK", name = "Chainlink", priceFormatted = "$0.00", rawPrice = 0.0, currencySymbol = "$", changePercent = 0.0, changeFormatted = "0.00%", isPositive = true, sparklinePoints = listOf(50f, 50f, 50f, 50f, 50f), sourceApp = "Midas Kripto", binanceReferencePrice = 0.0, leadLagDiffPercent = 0.0),
-        CryptoAsset(id = "AVAX", symbol = "AVAX", name = "Avalanche", priceFormatted = "$0.00", rawPrice = 0.0, currencySymbol = "$", changePercent = 0.0, changeFormatted = "0.00%", isPositive = true, sparklinePoints = listOf(50f, 50f, 50f, 50f, 50f), sourceApp = "Midas Kripto", binanceReferencePrice = 0.0, leadLagDiffPercent = 0.0)
+        CryptoAsset(id = "AVAX", symbol = "AVAX", name = "Avalanche", priceFormatted = "$0.00", rawPrice = 0.0, currencySymbol = "$", changePercent = 0.0, changeFormatted = "0.00%", isPositive = true, sparklinePoints = listOf(50f, 50f, 50f, 50f, 50f), sourceApp = "Midas Kripto", binanceReferencePrice = 0.0, leadLagDiffPercent = 0.0),
+        CryptoAsset(id = "LINK", symbol = "LINK", name = "Chainlink", priceFormatted = "$0.00", rawPrice = 0.0, currencySymbol = "$", changePercent = 0.0, changeFormatted = "0.00%", isPositive = true, sparklinePoints = listOf(50f, 50f, 50f, 50f, 50f), sourceApp = "Midas Kripto", binanceReferencePrice = 0.0, leadLagDiffPercent = 0.0)
     )
 
     private val _cryptoAssets = MutableStateFlow<List<CryptoAsset>>(initialAssets)
@@ -265,7 +265,7 @@ object CryptoMarketRepository {
 
     private suspend fun fetchTechnicalCandles() = withContext(Dispatchers.IO) {
         val analysisResults = mutableMapOf<String, TechnicalAnalysis5m>()
-        val symbolsToAnalyze = listOf("BTC", "ETH", "SOL", "AVAX", "XRP", "DOGE", "PEPE", "SUI")
+        val symbolsToAnalyze = listOf("BTC", "ETH", "AVAX", "LINK")
         val orderBooks = BinanceWebSocketService.orderBookMap.value
 
         for (symbol in symbolsToAnalyze) {
