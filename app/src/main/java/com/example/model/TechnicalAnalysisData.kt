@@ -66,6 +66,8 @@ data class TechnicalAnalysis5m(
     val dcaTier1Weight: Double = 1.0, // 1x (e.g. $15)
     val dcaTier2Weight: Double = 2.0, // 2x (e.g. $30)
     val dcaTier3Weight: Double = 4.0, // 4x (e.g. $60)
+    val vwap: Double = 0.0, // Volume-Weighted Average Price
+    val volumeMomentum: Double = 1.0, // Recent 3-candle volume surge ratio
     val lastUpdated: Long = System.currentTimeMillis()
 )
 

@@ -180,11 +180,11 @@ object AiAdvisorEngine {
                     statusColorHex = 0xFF00FF9D,
                     step1 = "1. Anlık fiyat ($${String.format(Locale.US, if (currentPrice < 1.0) "%.4f" else "%.2f", currentPrice)}) pusu limitinize ($${String.format(Locale.US, if (pending.entryPrice < 1.0) "%.4f" else "%.2f", pending.entryPrice)}) ulaştı veya altına indi!",
                     step2 = "2. Midas hesabınızı kontrol edin: Limit alış emriniz dolduysa 'Alış Gerçekleşti mi?' butonuna basıp onaylayın.",
-                    step3 = "3. Alım teyit edildikten sonra anında +%2.0 Net kârlı limit satış emri aktif edilecektir.",
+                    step3 = "3. Alım teyit edildikten sonra anında +%1.0 Net kârlı limit satış emri aktif edilecektir.",
                     targetSymbol = pending.symbol,
                     recommendedEntryPrice = pending.entryPrice,
                     recommendedExitPrice = pending.targetExitPrice,
-                    netProfitUsdtExpected = pending.investedUsdt * 0.020,
+                    netProfitUsdtExpected = pending.investedUsdt * 0.010,
                     reasoning = "5 dakikalık dip desteği test edildi. Emir dolduysa pozisyonu aktifleştirin."
                 )
             } else if (remainingMinutes <= 0) {
@@ -216,46 +216,71 @@ object AiAdvisorEngine {
             }
         }
 
-        // 3. Case: Piyasayı Tara ve En Kaliteli Dip Alım Fırsatını Bul
+        // 3. Case: Piyasayı Tara ve 3 Kurumsal Filtreden Geçen En Kaliteli Dip Alım Fırsatını Bul
         var bestOpportunity: Pair<CryptoAsset, TechnicalAnalysis5m>? = null
-        var highestScore = -1
+        var highestScore = -100.0
 
         for (asset in assets) {
             val tech = techMap[asset.symbol] ?: continue
-            val score = tech.confluenceScore
-            // Filter out volume shocks (knife catch) and seller dominant order books (<60% buyers)
-            if (score > highestScore && !tech.isOverboughtRisk && !tech.isVolumeShock && !tech.orderBookDepth.isOrderBookFear) {
-                highestScore = score
+            val candles = asset.recentCandles
+            val latestCandle = candles.lastOrNull()
+            val isRedCandle = latestCandle != null && latestCandle.close < latestCandle.open
+            val isDeepDump = isRedCandle && (tech.zScore < -1.8 || tech.isPriceBelowBollingerLower)
+
+            // 1. Düşen Bıçak Filtresi: Fiyat Bollinger altındayken hala kırmızıysa girilmez, yeşil teyit beklenir.
+            val isFallingKnife = isDeepDump && (latestCandle.close - latestCandle.low) < (latestCandle.open - latestCandle.close) * 0.5
+
+            // 2. Anti-Spoofing Hacim İvmesi: Alıcı duvarı (>= %60) yanında hacim ivmesi pozitif olmalı (gerçek nakit girişi)
+            val bidRatio = tech.orderBookDepth.bidRatio
+            val volMomentum = if (asset.volumeMomentum > 0) asset.volumeMomentum else tech.volumeMomentum
+
+            // 3. VWAP Kalkanı & Mıknatıs Çekimi
+            val currentP = if (asset.rawPrice > 0) asset.rawPrice else tech.currentPrice
+            val vwapVal = if (asset.vwap > 0) asset.vwap else tech.vwap
+            val vwapDistPct = if (currentP > 0 && vwapVal > 0) ((vwapVal - currentP) / currentP) * 100.0 else 0.0
+
+            if (isFallingKnife || tech.isVolumeShock || tech.orderBookDepth.isOrderBookFear || tech.isOverboughtRisk) {
+                continue
+            }
+
+            // Kurumsal Skorlama Formülü (Confluence + VWAP Mıknatısı + Hacim İvmesi)
+            var quantScore = tech.confluenceScore.toDouble()
+            if (volMomentum >= 1.10) quantScore += 15.0 // Anti-spoofing hacim patlaması
+            if (vwapDistPct in 0.3..3.5) quantScore += 15.0 // Sağlıklı VWAP mıknatıs sekmesi
+            if (latestCandle != null && latestCandle.close >= latestCandle.open) quantScore += 10.0 // Yeşil dönüş mumu teyidi
+
+            if (quantScore > highestScore) {
+                highestScore = quantScore
                 bestOpportunity = Pair(asset, tech)
             }
         }
 
-        if (bestOpportunity != null && highestScore >= 60) {
+        if (bestOpportunity != null && highestScore >= 60.0) {
             val (asset, tech) = bestOpportunity
             val currentPrice = if (asset.rawPrice > 0) asset.rawPrice else tech.currentPrice
             val strategyAnalysis = evaluateSmartEntryStrategies(asset, tech, currentPrice, capitalProfile)
             val recommendedPlan = strategyAnalysis.options.firstOrNull { it.isRecommended } ?: strategyAnalysis.options[0]
             val entryLimit = recommendedPlan.price
-            // Net 2.0% profit target + 0.40% total Midas buy/sell commission
-            val targetExit = entryLimit * (1.0 + (2.0 + 0.40) / 100.0)
+            // Net 1.0% profit target + 0.40% total Midas buy/sell commission (Micro-Scalping)
+            val targetExit = entryLimit * (1.0 + (1.0 + 0.40) / 100.0)
             val tier1InvestBudget = (cash * (1.0 / 7.0)).coerceIn(15.0, (cash * 0.35).coerceAtLeast(15.0))
-            val expectedNetUsdt = tier1InvestBudget * 0.020
+            val expectedNetUsdt = tier1InvestBudget * 0.010
 
             val orderBookRatio = String.format(Locale.US, "%.0f", tech.orderBookDepth.bidRatio * 100)
-            val zScoreText = String.format(Locale.US, "%.2f", tech.zScore)
+            val vwapText = String.format(Locale.US, if (asset.vwap < 1.0) "%.4f" else "%.2f", if (asset.vwap > 0) asset.vwap else tech.vwap)
 
             return ActionGuidance(
-                title = "🎯 AI ÖNERİSİ (${recommendedPlan.title}): ${asset.symbol}/USDT",
-                statusBadge = "GÜÇLÜ PUSU SİNYALİ (SKOR: %$highestScore)",
+                title = "🎯 AI NİHAİ PUSU (${recommendedPlan.title}): ${asset.symbol}/USDT",
+                statusBadge = "KURUMSAL SİNYAL (SKOR: %${String.format(Locale.US, "%.0f", highestScore)})",
                 statusColorHex = 0xFF00FF9D,
                 step1 = "1. MİDAS 1. KADEME (${recommendedPlan.title}): $${String.format(Locale.US, if (entryLimit < 1.0) "%.4f" else "%.2f", entryLimit)} USDT fiyatından ~$${String.format(Locale.US, "%.0f", tier1InvestBudget)} limit alış girin (${recommendedPlan.fillSpeedText}).",
                 step2 = "2. 🛡️ 3 KADEMELİ SAVUNMA: Fiyat sarkarsa 2. Kademe ($${String.format(Locale.US, if (tech.dcaTier2Price < 1.0) "%.4f" else "%.2f", tech.dcaTier2Price)}) ve 3. Kademe ($${String.format(Locale.US, if (tech.dcaTier3Price < 1.0) "%.4f" else "%.2f", tech.dcaTier3Price)}) hazır bekler.",
-                step3 = "3. 🎯 KÂR ÇIKIŞI (+%2.0 NET): Alım dolduğu anda Midas'ta $${String.format(Locale.US, if (targetExit < 1.0) "%.4f" else "%.2f", targetExit)} USDT limit satış açılır.",
+                step3 = "3. 🎯 KÂR ÇIKIŞI (+%1.0 NET): Alım dolduğu anda Midas'ta $${String.format(Locale.US, if (targetExit < 1.0) "%.4f" else "%.2f", targetExit)} USDT limit satış açılır.",
                 targetSymbol = asset.symbol,
                 recommendedEntryPrice = entryLimit,
                 recommendedExitPrice = targetExit,
                 netProfitUsdtExpected = expectedNetUsdt,
-                reasoning = "Yapay Zekâ Analizi: ${strategyAnalysis.aiRecommendationReason} | Tahta: %$orderBookRatio Alıcı | Z-Score: ${zScoreText}σ | ATR: ${String.format(Locale.US, "%.2f", tech.atr14)}"
+                reasoning = "Kusursuz Sniper: ${strategyAnalysis.aiRecommendationReason} | Tahta: %$orderBookRatio Alıcı | VWAP: $$vwapText | Hacim İvmesi: ${String.format(Locale.US, "%.2f", asset.volumeMomentum)}x"
             )
         }
 
@@ -579,60 +604,42 @@ object AiAdvisorEngine {
     }
 
     /**
-     * Calculates the optimal ambush time-to-live (TTL) in minutes based on professional quant
-     * candle count cycles on 5m charts and asset ATR/volatility.
-     *
-     * Rules:
-     * - High Volatility (ATR >= 1.3% or high beta like SOL/PEPE/DOGE/AVAX/NEAR): 30 Mins (6 Candles) - Fast Scalp TTL
-     * - Balanced Pullback (ATR 0.7% - 1.3% e.g. ETH/LINK/ADA): 45 Mins (9 Candles) - Standard Pullback TTL
-     * - Low Volatility / Heavy Base (ATR < 0.7% e.g. BTC): 60 Mins (12 Candles) - Patient Base Retest TTL
+     * Calculates the optimal sniper ambush time-to-live (TTL) in minutes (Fixed 15m - 3 Candles on 5m chart).
      */
     fun calculateOptimalAmbushTimeout(asset: CryptoAsset, tech: TechnicalAnalysis5m?): Pair<Int, String> {
-        val atrPct = if (asset.rawPrice > 0 && tech != null) (tech.atr14 / asset.rawPrice) * 100.0 else 1.0
-        val isHighBeta = asset.symbol in listOf("SOL", "PEPE", "DOGE", "SHIB", "NEAR", "SUI", "AVAX")
-
-        return when {
-            atrPct >= 1.3 || (isHighBeta && atrPct >= 1.0) -> {
-                Pair(30, "Yüksek Oynaklık (6 Mum / Hızlı Scalp TTL). Fiyat 30 dk içinde desteğe inmezse trend yukarı kaçmış veya yapı bozulmuştur.")
-            }
-            atrPct <= 0.7 || asset.symbol in listOf("BTC", "USDC") -> {
-                Pair(60, "Ağır Tahta / Taban Akümülasyonu (12 Mum / Sabırlı Taban). Desteğin test edilmesi daha uzun bir konsolidasyon gerektirir.")
-            }
-            else -> {
-                Pair(45, "Standart 5m Pullback (9 Mum / Dengeli). Klasik EMA20 / Destek retest döngüsü.")
-            }
-        }
+        return Pair(15, "15 Dakika (3 Mum / Keskin Nişancı TTL). Fiyat 3 mum içinde desteğe inmezse trend yukarı kaçmıştır, emir taze fırsata devredilir.")
     }
 
     /**
      * Calculates the 3-Tier Zero-Loss DCA defense map based on an entered (or accidental) entry price.
      * Gives the exact limit buy prices, allocated cash, updated average costs, and net-profit exit targets.
+     * Uses closer DCA tier spacing: Tier 2 -> 1.0 * ATR, Tier 3 -> 2.0 * ATR.
      */
     fun calculateDcaDefensePlan(
         entryPrice: Double,
         totalPoolUsdt: Double,
         tech: TechnicalAnalysis5m?,
-        targetProfitPct: Double = 2.0
+        targetProfitPct: Double = 1.0
     ): DcaDefensePlan {
         val safeEntry = if (entryPrice > 0) entryPrice else 100.0
         val safePool = if (totalPoolUsdt > 0) totalPoolUsdt else 60.0
         val tierAmount = safePool / 3.0
 
-        // Dynamic drop percentages based on ATR if available, else standard -3.5% and -7.0%
-        val tier2Price = if (tech != null && tech.supportLevel > 0 && tech.supportLevel < safeEntry) {
+        // Tighter DCA tier distances: 1.0 * ATR and 2.0 * ATR
+        val tier2Price = if (tech != null && tech.atr14 > 0) {
+            (safeEntry - (tech.atr14 * 1.0)).coerceIn(safeEntry * 0.965, safeEntry * 0.992)
+        } else if (tech != null && tech.supportLevel > 0 && tech.supportLevel < safeEntry) {
             tech.supportLevel
-        } else if (tech != null && tech.atr14 > 0) {
-            (safeEntry - (tech.atr14 * 2.0)).coerceIn(safeEntry * 0.94, safeEntry * 0.975)
         } else {
-            safeEntry * 0.965 // -3.5%
+            safeEntry * 0.985 // -1.5%
         }
 
-        val tier3Price = if (tech != null && tech.dcaTier3Price > 0 && tech.dcaTier3Price < tier2Price) {
+        val tier3Price = if (tech != null && tech.atr14 > 0) {
+            (safeEntry - (tech.atr14 * 2.0)).coerceIn(safeEntry * 0.930, safeEntry * 0.975)
+        } else if (tech != null && tech.dcaTier3Price > 0 && tech.dcaTier3Price < tier2Price) {
             tech.dcaTier3Price
-        } else if (tech != null && tech.atr14 > 0) {
-            (safeEntry - (tech.atr14 * 4.0)).coerceIn(safeEntry * 0.88, safeEntry * 0.94)
         } else {
-            safeEntry * 0.930 // -7.0%
+            safeEntry * 0.970 // -3.0%
         }
 
         // Tier 1 calculation
@@ -642,7 +649,7 @@ object AiAdvisorEngine {
         val t1ProfitUsdt = tierAmount * (targetProfitPct / 100.0)
         val t1 = DcaPlanTier(
             tierNumber = 1,
-            name = "1. Kademe (Mevcut / Giriş)",
+            name = "1. Kademe (Pusu Girişi)",
             price = safeEntry,
             dropPercentFromEntry = 0.0,
             allocatedUsdt = tierAmount,
@@ -662,7 +669,7 @@ object AiAdvisorEngine {
         val t2ProfitUsdt = cumInvest2 * (targetProfitPct / 100.0)
         val t2 = DcaPlanTier(
             tierNumber = 2,
-            name = "2. Kademe (Dip Destek Ekleme)",
+            name = "2. Kademe (1.0x ATR Destek)",
             price = tier2Price,
             dropPercentFromEntry = ((safeEntry - tier2Price) / safeEntry) * 100.0,
             allocatedUsdt = tierAmount,
@@ -682,7 +689,7 @@ object AiAdvisorEngine {
         val t3ProfitUsdt = cumInvest3 * (targetProfitPct / 100.0)
         val t3 = DcaPlanTier(
             tierNumber = 3,
-            name = "3. Kademe (Son Savunma / Taban)",
+            name = "3. Kademe (2.0x ATR Son Savunma)",
             price = tier3Price,
             dropPercentFromEntry = ((safeEntry - tier3Price) / safeEntry) * 100.0,
             allocatedUsdt = tierAmount,
@@ -701,8 +708,11 @@ object AiAdvisorEngine {
     }
 
     /**
-     * Calculates the 3 Dynamic Entry Modes (Fast Trend, Balanced Support, Deep Dip)
-     * and utilizes AI quant rules to designate the optimal recommendation with clear reasoning.
+     * Calculates the Single High-Precision Sniper Ambush Strategy (Kusursuz Keskin Nişancı Pususu).
+     * Enforces the 3 Institutional Filters:
+     * 1. Falling Knife Sensor (Düşen Bıçak Sensörü - Bollinger altından taşsa bile kırmızı mumda girilmez, yeşil dönüş beklenir)
+     * 2. VWAP Shield (VWAP Kalkanı - Fiyatın VWAP'a uzaklığı ve mıknatıs sekmesi)
+     * 3. Volume Momentum Anti-Spoofing (Tahtadaki alıcı duvarının gerçek hacim ivmesiyle teyidi)
      */
     fun evaluateSmartEntryStrategies(
         asset: CryptoAsset,
@@ -712,99 +722,94 @@ object AiAdvisorEngine {
     ): CoinEntryStrategyAnalysis {
         val safeCurrent = if (asset.rawPrice > 0) asset.rawPrice else if (currentPrice > 0) currentPrice else (tech?.currentPrice ?: 100.0)
 
-        // Dynamic Vault Shield (Kasa Kalkanı): If cash ratio is below 50%, force DEEP_DIP mode
-        val availableCash = capitalProfile?.availableCashUsdt ?: 100.0
-        val totalCash = if (capitalProfile != null && capitalProfile.totalDepositedUsdt > 0) capitalProfile.totalDepositedUsdt else availableCash
-        val cashRatio = if (totalCash > 0) availableCash / totalCash else 1.0
-        val isShieldActive = cashRatio < 0.50
-
-        // 1. FAST_TREND: Pullback to EMA9 or 0.35% - 0.50% below current price
         val ema9 = tech?.ema9 ?: (safeCurrent * 0.996)
-        val fastPrice = if (ema9 > 0 && ema9 in (safeCurrent * 0.985)..(safeCurrent * 0.998)) {
-            ema9
-        } else {
-            safeCurrent * 0.9960 // -0.40%
+        val bbLower = tech?.bollingerLower ?: (safeCurrent * 0.988)
+        val dynamicSupport = tech?.supportLevel ?: (safeCurrent * 0.990)
+        val bidRatio = tech?.orderBookDepth?.bidRatio ?: 0.65
+        val zScore = tech?.zScore ?: 0.0
+        val atr = tech?.atr14 ?: (safeCurrent * 0.008)
+        val rsi = tech?.rsi14 ?: 48.0
+        val vwap = if (asset.vwap > 0) asset.vwap else (tech?.vwap ?: safeCurrent)
+        val volMomentum = if (asset.volumeMomentum > 0) asset.volumeMomentum else (tech?.volumeMomentum ?: 1.0)
+
+        val recentCandles = asset.recentCandles
+        val latestCandle = recentCandles.lastOrNull()
+        val isLastCandleGreen = latestCandle != null && latestCandle.close >= latestCandle.open
+        val isLowerWickBounce = latestCandle != null && (minOf(latestCandle.open, latestCandle.close) - latestCandle.low) > (kotlin.math.abs(latestCandle.close - latestCandle.open) * 0.8)
+
+        // 1. DÜŞEN BIÇAK SENSÖRÜ: Fiyat Bollinger alt bandını delse bile kırmızı mum akıyorsa pusu desteğin az altına (EMA/Destek) kurulur
+        val isFallingKnifeActive = latestCandle != null && latestCandle.close < latestCandle.open && tech != null && tech.isPriceBelowBollingerLower
+
+        // 2. VWAP KALKANI: Fiyatın VWAP'a olan oransal mesafesi
+        val vwapDistancePct = if (vwap > 0) ((vwap - safeCurrent) / vwap) * 100.0 else 0.0
+
+        // 3. HACİM İVMESİ (ANTİ-SPOOFING): Hacim ivmesi >= 1.05 ise gerçek para girişi onaylı
+        val isVolumeConfirmed = volMomentum >= 1.05
+
+        // Sniper Price Algorithm:
+        val sniperPrice = when {
+            // Eğer yeşil dönüş mumu oluşmuş ve alıcı baskısı güçlüyse EMA9 veya güncel taban desteği pusu noktasıdır
+            (isLastCandleGreen || isLowerWickBounce) && bidRatio >= 0.65 && ema9 in (safeCurrent * 0.988)..(safeCurrent * 0.999) -> {
+                ema9
+            }
+            // VWAP altında aşırı satım varsa ve hacim ivmesi destekliyorsa dinamik taban
+            vwapDistancePct > 0.40 && dynamicSupport in (safeCurrent * 0.970)..(safeCurrent * 0.996) -> {
+                dynamicSupport
+            }
+            // Bollinger Alt Bandı
+            bbLower in (safeCurrent * 0.970)..(safeCurrent * 0.995) -> {
+                bbLower
+            }
+            else -> {
+                safeCurrent * 0.9940 // -0.60% mikro dip pusu
+            }
         }
 
-        // 2. BALANCED_SUPPORT: Pullback to Bollinger Middle / EMA21 or 0.8% - 1.2% below
-        val ema21 = tech?.ema21 ?: (safeCurrent * 0.992)
-        val bbMid = tech?.bollingerMiddle ?: (safeCurrent * 0.992)
-        val balancedPrice = if (bbMid > 0 && bbMid in (safeCurrent * 0.970)..(safeCurrent * 0.995)) {
-            bbMid
-        } else if (ema21 > 0 && ema21 in (safeCurrent * 0.970)..(safeCurrent * 0.995)) {
-            ema21
-        } else {
-            safeCurrent * 0.9920 // -0.80%
+        val dropPercent = (((safeCurrent - sniperPrice) / safeCurrent) * 100.0).coerceAtLeast(0.15)
+
+        // Havalı ve Prestijli Eğitici AI Mentör Açıklaması
+        val mentorReason = buildString {
+            append("🎯 QUANT AI MENTÖR (Kurumsal Sniper Raporu): ")
+            // VWAP Kalkanı
+            if (vwap > 0) {
+                val vwapStr = String.format(Locale.US, if (vwap < 1.0) "%.4f" else "%.2f", vwap)
+                if (safeCurrent < vwap) {
+                    append("⚡ VWAP Kalkanı ($$vwapStr): Fiyat VWAP altında taban arıyor (+%${String.format(Locale.US, "%.2f", vwapDistancePct)} mıknatıs çekim potansiyeli). ")
+                } else {
+                    append("⚡ VWAP Üzeri Güçlü Akış ($$vwapStr): Kurumsal ortalama üzerinde tutunuyor. ")
+                }
+            }
+            // Hacim İvmesi & Anti-Spoofing
+            if (isVolumeConfirmed) {
+                append("🌊 Hacim İvmesi (${String.format(Locale.US, "%.2f", volMomentum)}x): Tahtadaki %${String.format(Locale.US, "%.0f", bidRatio * 100)} alıcı duvarı sahte emir (spoofing) değil, gerçek kurumsal para girişiyle teyit edildi. ")
+            } else {
+                append("🛡️ Tahta Dengesi: %${String.format(Locale.US, "%.0f", bidRatio * 100)} alıcı derinliği izleniyor. ")
+            }
+            // Düşen Bıçak Durumu
+            if (isFallingKnifeActive) {
+                append("⚠️ Düşen Bıçak Sensörü Devrede: Mum kapanışında kırmızı baskı var, emri güvenli taban desteğine ($${String.format(Locale.US, if (sniperPrice < 1.0) "%.4f" else "%.2f", sniperPrice)}) kurduk. ")
+            } else if (isLastCandleGreen || isLowerWickBounce) {
+                append("🟢 Yeşil Dönüş Teyidi: Dip fitilinden alıcı tepkisi geldi. ")
+            }
+            // Z-Score & ATR
+            append("Z-Skor: ${String.format(Locale.US, "%.2f", zScore)}σ (İstatistiki Güvenilirlik) | ATR: $${String.format(Locale.US, if (atr < 1.0) "%.4f" else "%.2f", atr)}.")
         }
 
-        // 3. DEEP_DIP: Full dynamic support / Bollinger Lower / 1.8% - 2.5% below
-        val dynamicSupport = tech?.supportLevel ?: (safeCurrent * 0.982)
-        val deepPrice = if (dynamicSupport > 0 && dynamicSupport in (safeCurrent * 0.960)..(safeCurrent * 0.988)) {
-            dynamicSupport
-        } else {
-            safeCurrent * 0.9820 // -1.8%
-        }
-
-        // AI Recommendation Logic based on Vault Shield, Trend, Momentum & RSI:
-        val rsi = tech?.rsi14 ?: 50.0
-        val isBullishTrend = (rsi >= 45.0 && safeCurrent >= (tech?.ema21 ?: 0.0)) || (tech?.confluenceScore ?: 50) >= 60
-        val isOversoldOrDip = rsi <= 38.0 || (tech?.isZScoreDip == true) || ((tech?.distanceToSupportPercent ?: 2.0) <= 0.60)
-
-        val recommendedType = when {
-            isShieldActive -> SmartEntryType.DEEP_DIP
-            isOversoldOrDip -> SmartEntryType.DEEP_DIP
-            isBullishTrend -> SmartEntryType.FAST_TREND
-            else -> SmartEntryType.BALANCED_SUPPORT
-        }
-
-        val aiReason = when {
-            isShieldActive -> "🛡️ KASA KALKANI AKTİF: Nakit oranınız %50'nin altına düştüğü için risk minimize edildi. Cephaneyi korumak adına sadece ekstrem Dip Avcısı seviyesinden pusu önerilir."
-            recommendedType == SmartEntryType.FAST_TREND -> "Yükseliş trendi aktif (RSI: ${String.format(Locale.US, "%.0f", rsi)}). Fiyat derin desteğe inmeden mikro çekilmede yakalamak için Hızlı Giriş önerilir. Düşüşe karşı 2. ve 3. kademeler hazırdır."
-            recommendedType == SmartEntryType.DEEP_DIP -> "Fiyat zaten aşırı satım/dip bölgesinde (RSI: ${String.format(Locale.US, "%.0f", rsi)}). Maksimum kâr potansiyeli için ana tabandan Dip Avcısı önerilir."
-            else -> "Piyasa dengeli konsolidasyonda. 30-45 dk içinde dolma ihtimali en dengeli olan Mikro Destek seviyesi önerilir."
-        }
-
-        val fastDrop = ((safeCurrent - fastPrice) / safeCurrent) * 100.0
-        val balancedDrop = ((safeCurrent - balancedPrice) / safeCurrent) * 100.0
-        val deepDrop = ((safeCurrent - deepPrice) / safeCurrent) * 100.0
-
-        val options = listOf(
-            SmartEntryPlan(
-                type = SmartEntryType.FAST_TREND,
-                title = "⚡ Hızlı Giriş",
-                subtitle = "Trend / EMA9",
-                price = fastPrice,
-                dropPercent = fastDrop.coerceAtLeast(0.1),
-                isRecommended = recommendedType == SmartEntryType.FAST_TREND,
-                reasoning = "Trendi kaçırmamak için anlık fiyata yakın giriş (%80+ dolma ihtimali)",
-                fillSpeedText = "~10-20 Dk Dolum"
-            ),
-            SmartEntryPlan(
-                type = SmartEntryType.BALANCED_SUPPORT,
-                title = "⚖️ Dengeli Destek",
-                subtitle = "Mikro Destek",
-                price = balancedPrice,
-                dropPercent = balancedDrop.coerceAtLeast(0.4),
-                isRecommended = recommendedType == SmartEntryType.BALANCED_SUPPORT,
-                reasoning = "Orta seviye geri çekilme testi (%55 dolma ihtimali)",
-                fillSpeedText = "~30-45 Dk Dolum"
-            ),
-            SmartEntryPlan(
-                type = SmartEntryType.DEEP_DIP,
-                title = "🛡️ Dip Avcısı",
-                subtitle = "Ana Taban / BB Alt",
-                price = deepPrice,
-                dropPercent = deepDrop.coerceAtLeast(1.0),
-                isRecommended = recommendedType == SmartEntryType.DEEP_DIP,
-                reasoning = "Sert sarkma veya panik satışında en dipten alma (%25 dolma ihtimali)",
-                fillSpeedText = "~45-90 Dk / Sarkma"
-            )
+        val singleSniperOption = SmartEntryPlan(
+            type = SmartEntryType.FAST_TREND,
+            title = "🎯 Keskin Nişancı Pususu",
+            subtitle = "VWAP + Hacim İvmesi & Anti-Spoofing",
+            price = sniperPrice,
+            dropPercent = dropPercent,
+            isRecommended = true,
+            reasoning = mentorReason,
+            fillSpeedText = "⏱️ 15 Dk Sniper Pusu Süresi"
         )
 
         return CoinEntryStrategyAnalysis(
-            recommendedType = recommendedType,
-            aiRecommendationReason = aiReason,
-            options = options
+            recommendedType = SmartEntryType.FAST_TREND,
+            aiRecommendationReason = mentorReason,
+            options = listOf(singleSniperOption)
         )
     }
 }

@@ -81,16 +81,19 @@ object GeminiMarketAnalystService {
             "Henüz geçmiş işlem kaydı yok (İlk işlemler)."
         }
 
-        // Prompt for Primary Gemini Pro with RAG Context
+        // Prompt for Primary Gemini Pro with RAG Context & Educational Mentor
         val proPrompt = """
-            Sen kurumsal bir Yapay Zeka Kantitatif Algoritma Uzmanı, Portföy/Fon Yöneticisi ve Trade Mentorüsün. 
+            Sen global standartlarda bir Yapay Zekâ Kantitatif Analisti, Portföy Yöneticisi ve "Eğitici AI Mentör"sün. 
             Midas Kripto (USDT) kullanıcısı için akşam seansında $symbol/USDT paritesindeki 5m canlı teknik verileri ve kullanıcının geçmiş işlem hafızasını analiz et.
 
             KATI KURALLAR:
-            - Asla stop-loss önerme (sistemde sıfır zarar ve 3 kademeli ATR DCA uygulanır).
+            - Asla stop-loss önerme (sistemde sıfır zarar, spot sabır ve 3 kademeli ATR DCA uygulanır).
             - Midas komisyonu (%0.40) düşüldükten sonra net %$targetNetProfitPercent kâr hedeflenir.
-            - Kullanıcının işlem hafızasına (geçmiş işlemlerine) mutlaka bak. Eğer bu coinden son işlemlerde kâr edilmişse 'Daha önce kazandığımız gibi...' diyerek güven ver. Eğer zarar edilmişse veya durgunsa ekstra temkinli uyarılarda bulun.
-            - Yanıtını MAKSİMUM 2-3 KISA, KLİNİK VE MATEMATİKSEL CÜMLE ile açıkla (Örn: ATR sıkışması, Z-Score sapması, tahtadaki alıcı duvarı, işlem hafızası ve pusu gerekçesi).
+            - KESKİN NİŞANCI PUSUSU: Fiyatı kovalama, EMA9 ve Bollinger Alt bandının alıcı duvarıyla (%65+) kesiştiği destek noktasına pusu kur.
+            - EĞİTİCİ MENTÖR AÇIKLAMASI (ZORUNLU): Sinyalin yanına mutlaka hiç teknik analiz bilmeyen birinin bile 5 saniyede anlayacağı 'Eğitici Mentör' açıklaması ekle:
+              * Neden tam olarak buradan alıyoruz?
+              * Z-Score ve ATR şu an bize ne söylüyor? (Örn: "Z-Score fiyatın olağan ortalamasından ne kadar saptığını ölçer; şu an aşırı dipteyiz", "ATR oynaklığı ölçer; kademelerimizi güvenli mesafeye koymamızı sağlar").
+              * Bunu çok şık, Türkçe, samimi ve finansal okuryazarlık kazandıran bir dille 2-3 cümlede özetle.
 
             KULLANICI İŞLEM HAFIZASI:
             $tradeMemorySummary

@@ -155,6 +155,10 @@ object TechnicalAnalysisEngine {
             else -> "⏳ BEKLE (PİSAYADA NET DİP HENÜZ OLUŞMADI)"
         }
 
+        // 13. Institutional VWAP (Volume-Weighted Average Price) & Volume Momentum (Last 3 Candles)
+        val vwap = calculateVWAP(candles5m)
+        val volumeMomentum = calculateVolumeMomentum(candles5m)
+
         return TechnicalAnalysis5m(
             symbol = symbol,
             timeframe = "5m",
@@ -193,8 +197,39 @@ object TechnicalAnalysisEngine {
             dcaTier1Weight = 1.0, // $15
             dcaTier2Weight = 2.0, // $30
             dcaTier3Weight = 4.0, // $60
+            vwap = vwap,
+            volumeMomentum = volumeMomentum,
             lastUpdated = System.currentTimeMillis()
         )
+    }
+
+    fun calculateVWAP(candles: List<CandleStick>): Double {
+        if (candles.isEmpty()) return 0.0
+        var cumulativeTypicalPriceVolume = 0.0
+        var cumulativeVolume = 0.0
+
+        for (candle in candles) {
+            val typicalPrice = (candle.high + candle.low + candle.close) / 3.0
+            val vol = candle.volume
+            if (vol > 0) {
+                cumulativeTypicalPriceVolume += (typicalPrice * vol)
+                cumulativeVolume += vol
+            }
+        }
+
+        return if (cumulativeVolume > 0) {
+            cumulativeTypicalPriceVolume / cumulativeVolume
+        } else {
+            candles.last().close
+        }
+    }
+
+    fun calculateVolumeMomentum(candles: List<CandleStick>): Double {
+        if (candles.size < 6) return 1.0
+        val last3Volume = candles.takeLast(3).map { it.volume }.average()
+        val precedingCandles = candles.dropLast(3).takeLast(17)
+        val baselineVolume = if (precedingCandles.isNotEmpty()) precedingCandles.map { it.volume }.average() else last3Volume
+        return if (baselineVolume > 0) (last3Volume / baselineVolume) else 1.0
     }
 
     private fun calculateEMA(values: List<Double>, period: Int): Double {

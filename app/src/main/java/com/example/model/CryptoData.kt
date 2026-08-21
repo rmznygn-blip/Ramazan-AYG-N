@@ -11,10 +11,13 @@ data class CryptoAsset(
     val changeFormatted: String,
     val isPositive: Boolean,
     val sparklinePoints: List<Float> = listOf(50f, 55f, 53f, 60f, 65f, 62f, 70f, 68f, 75f),
+    val recentCandles: List<CandleStick> = emptyList(),
     val detectedAt: Long = System.currentTimeMillis(),
     val sourceApp: String = "Midas Kripto",
     val binanceReferencePrice: Double = 0.0,
-    val leadLagDiffPercent: Double = 0.0 // Difference between Binance truth and Midas price
+    val leadLagDiffPercent: Double = 0.0, // Difference between Binance truth and Midas price
+    val vwap: Double = 0.0, // Volume-Weighted Average Price
+    val volumeMomentum: Double = 1.0 // Ratio of recent 3-candle volume vs baseline
 )
 
 data class MidasAccountState(

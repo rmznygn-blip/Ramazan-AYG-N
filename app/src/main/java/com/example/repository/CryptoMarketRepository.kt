@@ -36,18 +36,15 @@ object CryptoMarketRepository {
     private var restPollingJob: Job? = null
     private var wsSyncJob: Job? = null
 
-    // Tracked Major Crypto Pairs on Midas & Binance (Evening Scalping & Swing Targets)
-    val MONITORED_SYMBOLS = listOf("BTC", "ETH", "SOL", "AVAX", "XRP", "DOGE", "PEPE", "SUI")
+    // Tracked Major Crypto Pairs on Midas & Binance (Elite 5 Scalping Majors)
+    val MONITORED_SYMBOLS = listOf("BTC", "ETH", "BNB", "LINK", "AVAX")
 
     private val initialAssets = listOf(
         CryptoAsset(id = "BTC", symbol = "BTC", name = "Bitcoin", priceFormatted = "$0.00", rawPrice = 0.0, currencySymbol = "$", changePercent = 0.0, changeFormatted = "0.00%", isPositive = true, sparklinePoints = listOf(50f, 50f, 50f, 50f, 50f), sourceApp = "Midas Kripto", binanceReferencePrice = 0.0, leadLagDiffPercent = 0.0),
         CryptoAsset(id = "ETH", symbol = "ETH", name = "Ethereum", priceFormatted = "$0.00", rawPrice = 0.0, currencySymbol = "$", changePercent = 0.0, changeFormatted = "0.00%", isPositive = true, sparklinePoints = listOf(50f, 50f, 50f, 50f, 50f), sourceApp = "Midas Kripto", binanceReferencePrice = 0.0, leadLagDiffPercent = 0.0),
-        CryptoAsset(id = "SOL", symbol = "SOL", name = "Solana", priceFormatted = "$0.00", rawPrice = 0.0, currencySymbol = "$", changePercent = 0.0, changeFormatted = "0.00%", isPositive = true, sparklinePoints = listOf(50f, 50f, 50f, 50f, 50f), sourceApp = "Midas Kripto", binanceReferencePrice = 0.0, leadLagDiffPercent = 0.0),
-        CryptoAsset(id = "AVAX", symbol = "AVAX", name = "Avalanche", priceFormatted = "$0.00", rawPrice = 0.0, currencySymbol = "$", changePercent = 0.0, changeFormatted = "0.00%", isPositive = true, sparklinePoints = listOf(50f, 50f, 50f, 50f, 50f), sourceApp = "Midas Kripto", binanceReferencePrice = 0.0, leadLagDiffPercent = 0.0),
-        CryptoAsset(id = "XRP", symbol = "XRP", name = "Ripple", priceFormatted = "$0.00", rawPrice = 0.0, currencySymbol = "$", changePercent = 0.0, changeFormatted = "0.00%", isPositive = true, sparklinePoints = listOf(50f, 50f, 50f, 50f, 50f), sourceApp = "Midas Kripto", binanceReferencePrice = 0.0, leadLagDiffPercent = 0.0),
-        CryptoAsset(id = "DOGE", symbol = "DOGE", name = "Dogecoin", priceFormatted = "$0.00", rawPrice = 0.0, currencySymbol = "$", changePercent = 0.0, changeFormatted = "0.00%", isPositive = true, sparklinePoints = listOf(50f, 50f, 50f, 50f, 50f), sourceApp = "Midas Kripto", binanceReferencePrice = 0.0, leadLagDiffPercent = 0.0),
-        CryptoAsset(id = "PEPE", symbol = "PEPE", name = "Pepe", priceFormatted = "$0.00", rawPrice = 0.0, currencySymbol = "$", changePercent = 0.0, changeFormatted = "0.00%", isPositive = true, sparklinePoints = listOf(50f, 50f, 50f, 50f, 50f), sourceApp = "Midas Kripto", binanceReferencePrice = 0.0, leadLagDiffPercent = 0.0),
-        CryptoAsset(id = "SUI", symbol = "SUI", name = "Sui", priceFormatted = "$0.00", rawPrice = 0.0, currencySymbol = "$", changePercent = 0.0, changeFormatted = "0.00%", isPositive = true, sparklinePoints = listOf(50f, 50f, 50f, 50f, 50f), sourceApp = "Midas Kripto", binanceReferencePrice = 0.0, leadLagDiffPercent = 0.0)
+        CryptoAsset(id = "BNB", symbol = "BNB", name = "BNB", priceFormatted = "$0.00", rawPrice = 0.0, currencySymbol = "$", changePercent = 0.0, changeFormatted = "0.00%", isPositive = true, sparklinePoints = listOf(50f, 50f, 50f, 50f, 50f), sourceApp = "Midas Kripto", binanceReferencePrice = 0.0, leadLagDiffPercent = 0.0),
+        CryptoAsset(id = "LINK", symbol = "LINK", name = "Chainlink", priceFormatted = "$0.00", rawPrice = 0.0, currencySymbol = "$", changePercent = 0.0, changeFormatted = "0.00%", isPositive = true, sparklinePoints = listOf(50f, 50f, 50f, 50f, 50f), sourceApp = "Midas Kripto", binanceReferencePrice = 0.0, leadLagDiffPercent = 0.0),
+        CryptoAsset(id = "AVAX", symbol = "AVAX", name = "Avalanche", priceFormatted = "$0.00", rawPrice = 0.0, currencySymbol = "$", changePercent = 0.0, changeFormatted = "0.00%", isPositive = true, sparklinePoints = listOf(50f, 50f, 50f, 50f, 50f), sourceApp = "Midas Kripto", binanceReferencePrice = 0.0, leadLagDiffPercent = 0.0)
     )
 
     private val _cryptoAssets = MutableStateFlow<List<CryptoAsset>>(initialAssets)
@@ -144,13 +141,20 @@ object CryptoMarketRepository {
                 newTechMap[symbol] = analysis
             }
 
-            // Extract last 20 close prices for live MiniSparkline visualization
-            val recentCloses = candles5m.takeLast(20).map { it.close.toFloat() }
-            if (recentCloses.isNotEmpty()) {
+            // Extract last 20 candles for live Candlestick & MiniSparkline visualization
+            val recent20Candles = candles5m.takeLast(20)
+            if (recent20Candles.isNotEmpty()) {
                 val assetIndex = updatedAssets.indexOfFirst { it.symbol == symbol }
                 if (assetIndex != -1) {
                     val curr = updatedAssets[assetIndex]
-                    updatedAssets[assetIndex] = curr.copy(sparklinePoints = recentCloses)
+                    val calculatedVwap = analysis?.vwap ?: TechnicalAnalysisEngine.calculateVWAP(candles5m)
+                    val calculatedVolMomentum = analysis?.volumeMomentum ?: TechnicalAnalysisEngine.calculateVolumeMomentum(candles5m)
+                    updatedAssets[assetIndex] = curr.copy(
+                        sparklinePoints = recent20Candles.map { it.close.toFloat() },
+                        recentCandles = recent20Candles,
+                        vwap = calculatedVwap,
+                        volumeMomentum = calculatedVolMomentum
+                    )
                     assetsChanged = true
                 }
             }
@@ -305,6 +309,21 @@ object CryptoMarketRepository {
                     )
                     if (analysis != null) {
                         analysisResults[symbol] = analysis
+                    }
+
+                    // Update asset list with VWAP and volume momentum
+                    val assetList = _cryptoAssets.value.toMutableList()
+                    val idx = assetList.indexOfFirst { it.symbol == symbol }
+                    if (idx != -1) {
+                        val recent20 = candleList5m.takeLast(20)
+                        val curr = assetList[idx]
+                        assetList[idx] = curr.copy(
+                            recentCandles = recent20,
+                            sparklinePoints = recent20.map { it.close.toFloat() },
+                            vwap = analysis?.vwap ?: TechnicalAnalysisEngine.calculateVWAP(candleList5m),
+                            volumeMomentum = analysis?.volumeMomentum ?: TechnicalAnalysisEngine.calculateVolumeMomentum(candleList5m)
+                        )
+                        _cryptoAssets.value = assetList
                     }
                 }
             } catch (e: Exception) {

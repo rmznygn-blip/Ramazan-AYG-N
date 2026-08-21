@@ -14,11 +14,13 @@ import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.*
+import androidx.compose.animation.core.*
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.gestures.detectTransformGestures
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyRow
@@ -32,12 +34,19 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.blur
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Path
+import androidx.compose.ui.graphics.PathMeasure
 import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.ui.hapticfeedback.HapticFeedbackType
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
@@ -49,6 +58,7 @@ import com.example.data.local.*
 import com.example.engine.ActionGuidance
 import com.example.engine.AiAdvisorEngine
 import com.example.model.BinanceOracleData
+import com.example.model.CandleStick
 import com.example.model.CryptoAsset
 import com.example.model.TechnicalAnalysis5m
 import com.example.repository.CryptoMarketRepository
@@ -151,6 +161,9 @@ fun CryptoAnalystMasterApp() {
 
     // Dialog state for 3-Tier Budget Allocation
     var showBudgetDialogForAsset by remember { mutableStateOf<CryptoAsset?>(null) }
+
+    // Dialog state for detailed Asset Details Screen (Candlestick & Quant Analysis)
+    var selectedAssetDetails by remember { mutableStateOf<CryptoAsset?>(null) }
 
     // Dialog state for adding existing Midas holdings
     var showAddExistingHoldingDialog by remember { mutableStateOf(false) }
@@ -412,6 +425,9 @@ fun CryptoAnalystMasterApp() {
                     onOpenBudgetProposal = { asset ->
                         showBudgetDialogForAsset = asset
                     },
+                    onOpenAssetDetails = { asset ->
+                        selectedAssetDetails = asset
+                    },
                     onOpenAddExistingDialog = {
                         showAddExistingHoldingDialog = true
                     },
@@ -541,6 +557,289 @@ fun CryptoAnalystMasterApp() {
                 )
             }
 
+            // 1.5 MODAL: STRATEJİ ODASI (WAR ROOM) - 5m Candlestick Chart & Educational AI Mentor
+            selectedAssetDetails?.let { asset ->
+                val tech = technicalAnalysisMap[asset.symbol]
+                val oracle = binanceOracleMap[asset.symbol]
+                val currentPrice = if (asset.rawPrice > 0) asset.rawPrice else (oracle?.binanceGlobalPrice ?: 0.0)
+
+                val strategyAnalysis = remember(asset, tech, currentPrice) {
+                    AiAdvisorEngine.evaluateSmartEntryStrategies(asset, tech, currentPrice)
+                }
+                val recommendedPlan = strategyAnalysis.options.firstOrNull { it.isRecommended } ?: strategyAnalysis.options[0]
+
+                val (recommendedTimeout, _) = remember(asset, tech) {
+                    AiAdvisorEngine.calculateOptimalAmbushTimeout(asset, tech)
+                }
+
+                val buyerRatio = ((tech?.orderBookDepth?.bidRatio ?: 0.65) * 100.0).coerceIn(10.0, 90.0)
+                val sellerRatio = (100.0 - buyerRatio).coerceIn(10.0, 90.0)
+                val zScoreVal = tech?.zScore ?: 0.0
+                val atrVal = tech?.atr14 ?: (currentPrice * 0.008)
+                val rsiVal = tech?.rsi14 ?: 50.0
+
+                AlertDialog(
+                    onDismissRequest = { selectedAssetDetails = null },
+                    containerColor = ObsidianCard,
+                    shape = RoundedCornerShape(18.dp),
+                    title = {
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                                Surface(
+                                    color = ObsidianCardElevated,
+                                    shape = RoundedCornerShape(8.dp),
+                                    border = BorderStroke(1.dp, IceCyanBright.copy(alpha = 0.6f))
+                                ) {
+                                    Text(
+                                        text = "${asset.symbol}/USDT",
+                                        color = IceCyanBright,
+                                        fontSize = 14.5.sp,
+                                        fontWeight = FontWeight.ExtraBold,
+                                        fontFamily = FontFamily.Monospace,
+                                        modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
+                                    )
+                                }
+                                Text(
+                                    text = "⚔️ Strateji Odası",
+                                    color = TextSecondary,
+                                    fontSize = 12.sp,
+                                    fontWeight = FontWeight.Bold
+                                )
+                            }
+                            Column(horizontalAlignment = Alignment.End) {
+                                Text(
+                                    text = "$${String.format(Locale.US, if (currentPrice < 1.0) "%.4f" else "%.2f", currentPrice)}",
+                                    color = TextPrimary,
+                                    fontSize = 15.sp,
+                                    fontWeight = FontWeight.ExtraBold,
+                                    fontFamily = FontFamily.Monospace
+                                )
+                                Text(
+                                    text = asset.changeFormatted,
+                                    color = if (asset.isPositive) EmeraldProfit else CoralRed,
+                                    fontSize = 11.sp,
+                                    fontWeight = FontWeight.Bold
+                                )
+                            }
+                        }
+                    },
+                    text = {
+                        Column(
+                            modifier = Modifier.fillMaxWidth(),
+                            verticalArrangement = Arrangement.spacedBy(10.dp)
+                        ) {
+                            // 1. 5-Minute Binance Candlestick Chart (with Yellow EMA9 & Cyan Bollinger Overlay)
+                            Surface(
+                                color = ObsidianBg,
+                                shape = RoundedCornerShape(10.dp),
+                                border = BorderStroke(1.dp, ObsidianBorder),
+                                modifier = Modifier.fillMaxWidth()
+                            ) {
+                                Column(modifier = Modifier.padding(8.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                                    Row(
+                                        modifier = Modifier.fillMaxWidth(),
+                                        horizontalArrangement = Arrangement.SpaceBetween,
+                                        verticalAlignment = Alignment.CenterVertically
+                                    ) {
+                                        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                                            Text(
+                                                text = "📊 5m Mumlar",
+                                                color = IceCyanBright,
+                                                fontSize = 10.5.sp,
+                                                fontWeight = FontWeight.Bold
+                                            )
+                                            Text("•", color = TextTertiary, fontSize = 10.sp)
+                                            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(3.dp)) {
+                                                Box(modifier = Modifier.size(6.dp).clip(CircleShape).background(GoldWarm))
+                                                Text("EMA9", color = GoldWarm, fontSize = 9.sp, fontWeight = FontWeight.Bold)
+                                            }
+                                            Text("•", color = TextTertiary, fontSize = 10.sp)
+                                            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(3.dp)) {
+                                                Box(modifier = Modifier.size(6.dp).clip(CircleShape).background(IceCyan))
+                                                Text("Bollinger", color = IceCyan, fontSize = 9.sp, fontWeight = FontWeight.Bold)
+                                            }
+                                        }
+                                        val minC = asset.recentCandles.minOfOrNull { it.low } ?: currentPrice
+                                        val maxC = asset.recentCandles.maxOfOrNull { it.high } ?: currentPrice
+                                        Text(
+                                            text = "$${String.format(Locale.US, if (minC < 1.0) "%.4f" else "%.2f", minC)} - $${String.format(Locale.US, if (maxC < 1.0) "%.4f" else "%.2f", maxC)}",
+                                            color = TextTertiary,
+                                            fontSize = 8.5.sp,
+                                            fontFamily = FontFamily.Monospace
+                                        )
+                                    }
+
+                                    CandlestickChart(
+                                        candles = asset.recentCandles,
+                                        modifier = Modifier
+                                            .fillMaxWidth()
+                                            .height(125.dp),
+                                        isDetailed = true
+                                    )
+                                }
+                            }
+
+                            // 2. Order Book Buyer / Seller Battlefield Bar
+                            Surface(
+                                color = ObsidianCardElevated,
+                                shape = RoundedCornerShape(8.dp),
+                                border = BorderStroke(0.8.dp, ObsidianBorder),
+                                modifier = Modifier.fillMaxWidth()
+                            ) {
+                                Column(modifier = Modifier.padding(8.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                                    Row(
+                                        modifier = Modifier.fillMaxWidth(),
+                                        horizontalArrangement = Arrangement.SpaceBetween
+                                    ) {
+                                        Text(
+                                            text = "🟢 Alıcı Duvarı: %${String.format(Locale.US, "%.0f", buyerRatio)}",
+                                            color = EmeraldProfitBright,
+                                            fontSize = 9.5.sp,
+                                            fontWeight = FontWeight.Bold,
+                                            fontFamily = FontFamily.Monospace
+                                        )
+                                        Text(
+                                            text = "🔴 Satıcı Baskısı: %${String.format(Locale.US, "%.0f", sellerRatio)}",
+                                            color = CoralRedBright,
+                                            fontSize = 9.5.sp,
+                                            fontWeight = FontWeight.Bold,
+                                            fontFamily = FontFamily.Monospace
+                                        )
+                                    }
+
+                                    // Segmented Battlefield Bar
+                                    Row(
+                                        modifier = Modifier
+                                            .fillMaxWidth()
+                                            .height(8.dp)
+                                            .clip(RoundedCornerShape(4.dp))
+                                            .background(ObsidianBg)
+                                    ) {
+                                        Box(
+                                            modifier = Modifier
+                                                .fillMaxHeight()
+                                                .weight((buyerRatio / 100.0).toFloat().coerceIn(0.05f, 0.95f))
+                                                .background(EmeraldProfit)
+                                        )
+                                        Box(
+                                            modifier = Modifier
+                                                .fillMaxHeight()
+                                                .weight((sellerRatio / 100.0).toFloat().coerceIn(0.05f, 0.95f))
+                                                .background(CoralRed)
+                                        )
+                                    }
+                                }
+                            }
+
+                            // 3. Sniper Metrics: Giriş / Satış / Süre
+                            Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                                Surface(
+                                    modifier = Modifier.weight(1f),
+                                    color = ObsidianCardElevated,
+                                    shape = RoundedCornerShape(8.dp),
+                                    border = BorderStroke(0.8.dp, EmeraldProfit.copy(alpha = 0.5f))
+                                ) {
+                                    Column(modifier = Modifier.padding(7.dp), verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                                        Text("🎯 Pusu Giriş", color = EmeraldProfitBright, fontSize = 8.5.sp, fontWeight = FontWeight.Bold)
+                                        Text(
+                                            text = "$${String.format(Locale.US, if (recommendedPlan.price < 1.0) "%.4f" else "%.2f", recommendedPlan.price)}",
+                                            color = Color.White,
+                                            fontSize = 11.5.sp,
+                                            fontWeight = FontWeight.Bold,
+                                            fontFamily = FontFamily.Monospace
+                                        )
+                                        Text("-%${String.format(Locale.US, "%.1f", recommendedPlan.dropPercent)} Desteği", color = EmeraldProfit, fontSize = 8.sp)
+                                    }
+                                }
+
+                                val targetScalp = recommendedPlan.price * (1.0 + 0.014)
+                                Surface(
+                                    modifier = Modifier.weight(1f),
+                                    color = ObsidianCardElevated,
+                                    shape = RoundedCornerShape(8.dp),
+                                    border = BorderStroke(0.8.dp, GoldWarm.copy(alpha = 0.5f))
+                                ) {
+                                    Column(modifier = Modifier.padding(7.dp), verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                                        Text("🔴 Hedef Satış", color = GoldWarm, fontSize = 8.5.sp, fontWeight = FontWeight.Bold)
+                                        Text(
+                                            text = "$${String.format(Locale.US, if (targetScalp < 1.0) "%.4f" else "%.2f", targetScalp)}",
+                                            color = Color.White,
+                                            fontSize = 11.5.sp,
+                                            fontWeight = FontWeight.Bold,
+                                            fontFamily = FontFamily.Monospace
+                                        )
+                                        Text("+%1.0 Net Kâr", color = EmeraldProfitBright, fontSize = 8.sp, fontWeight = FontWeight.Bold)
+                                    }
+                                }
+
+                                Surface(
+                                    modifier = Modifier.weight(1f),
+                                    color = ObsidianCardElevated,
+                                    shape = RoundedCornerShape(8.dp),
+                                    border = BorderStroke(0.8.dp, IceCyanBright.copy(alpha = 0.4f))
+                                ) {
+                                    Column(modifier = Modifier.padding(7.dp), verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                                        Text("⏱️ Pusu Süresi", color = IceCyanBright, fontSize = 8.5.sp, fontWeight = FontWeight.Bold)
+                                        Text("${recommendedTimeout} Dk", color = Color.White, fontSize = 11.5.sp, fontWeight = FontWeight.Bold, fontFamily = FontFamily.Monospace)
+                                        Text("3 Mum (5m)", color = TextSecondary, fontSize = 8.sp)
+                                    }
+                                }
+                            }
+
+                            // 4. Educational AI Mentor Callout Box (Neden Buradayız?)
+                            Surface(
+                                color = ObsidianBg,
+                                shape = RoundedCornerShape(10.dp),
+                                border = BorderStroke(0.8.dp, GoldWarm.copy(alpha = 0.6f)),
+                                modifier = Modifier.fillMaxWidth()
+                            ) {
+                                Column(modifier = Modifier.padding(9.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                                    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                                        Text("🧠", fontSize = 13.sp)
+                                        Text(
+                                            text = "EĞİTİCİ MENTÖR (Neden Buradayız?)",
+                                            color = GoldWarm,
+                                            fontSize = 10.sp,
+                                            fontWeight = FontWeight.ExtraBold,
+                                            fontFamily = FontFamily.Monospace
+                                        )
+                                    }
+                                    Text(
+                                        text = strategyAnalysis.aiRecommendationReason,
+                                        color = TextPrimary.copy(alpha = 0.95f),
+                                        fontSize = 10.sp,
+                                        lineHeight = 14.sp
+                                    )
+                                }
+                            }
+                        }
+                    },
+                    confirmButton = {
+                        Button(
+                            onClick = {
+                                val target = asset
+                                selectedAssetDetails = null
+                                showBudgetDialogForAsset = target
+                            },
+                            colors = ButtonDefaults.buttonColors(containerColor = EmeraldProfit, contentColor = Color.Black),
+                            shape = RoundedCornerShape(10.dp),
+                            modifier = Modifier.fillMaxWidth().height(42.dp)
+                        ) {
+                            Text("🎯 Pusuyu Başlat (Hedef: +%1.0 Kâr)", fontWeight = FontWeight.ExtraBold, fontSize = 12.5.sp)
+                        }
+                    },
+                    dismissButton = {
+                        TextButton(onClick = { selectedAssetDetails = null }) {
+                            Text("Kapat", color = TextSecondary, fontSize = 11.sp)
+                        }
+                    }
+                )
+            }
+
             // 2. DIALOG: 3-TIER BUDGET ALLOCATION MODAL DIALOG
             showBudgetDialogForAsset?.let { asset ->
                 val tech = technicalAnalysisMap[asset.symbol]
@@ -567,7 +866,7 @@ fun CryptoAnalystMasterApp() {
                 val tier1Amount = totalAllocatedPool / 3.0
                 val tier2Amount = totalAllocatedPool / 3.0
                 val tier3Amount = totalAllocatedPool / 3.0
-                val targetExit = entryPrice * (1.0 + (2.0 + 0.40) / 100.0)
+                val targetExit = entryPrice * (1.0 + (1.0 + 0.40) / 100.0)
 
                 val (recommendedTimeout, reasonText) = remember(asset, tech) {
                     AiAdvisorEngine.calculateOptimalAmbushTimeout(asset, tech)
@@ -756,7 +1055,7 @@ fun CryptoAnalystMasterApp() {
                             }
 
                             val dcaDefensePlan = remember(entryPrice, totalAllocatedPool, tech) {
-                                AiAdvisorEngine.calculateDcaDefensePlan(entryPrice, totalAllocatedPool, tech, 2.0)
+                                AiAdvisorEngine.calculateDcaDefensePlan(entryPrice, totalAllocatedPool, tech, 1.0)
                             }
 
                             Surface(
@@ -787,7 +1086,7 @@ fun CryptoAnalystMasterApp() {
                                         fontWeight = FontWeight.Bold
                                     )
                                     Text(
-                                        text = "   🎯 Çıkış Hedefi: $${String.format(Locale.US, if (t1.targetExitPrice < 1.0) "%.4f" else "%.2f", t1.targetExitPrice)} USDT (+%2.0 net)",
+                                        text = "   🎯 Çıkış Hedefi: $${String.format(Locale.US, if (t1.targetExitPrice < 1.0) "%.4f" else "%.2f", t1.targetExitPrice)} USDT (+%1.0 net)",
                                         color = EmeraldProfit,
                                         fontSize = 9.5.sp
                                     )
@@ -858,9 +1157,9 @@ fun CryptoAnalystMasterApp() {
                                         horizontalArrangement = Arrangement.spacedBy(6.dp)
                                     ) {
                                         val timeOptions = listOf(
-                                            Triple(30, "30 Dk", "6 Mum"),
-                                            Triple(45, "45 Dk", "9 Mum"),
-                                            Triple(60, "60 Dk", "12 Mum")
+                                            Triple(15, "15 Dk", "3 Mum"),
+                                            Triple(20, "20 Dk", "4 Mum"),
+                                            Triple(30, "30 Dk", "6 Mum")
                                         )
                                         timeOptions.forEach { (mins, label, candleCount) ->
                                             val isSelected = selectedTimeoutMinutes == mins
@@ -902,7 +1201,7 @@ fun CryptoAnalystMasterApp() {
                             }
 
                             Text(
-                                text = "🎯 Hedef Çıkış: $${String.format(Locale.US, if (targetExit < 1.0) "%.4f" else "%.2f", targetExit)} (Net +%2.0 kâr + %0.40 Midas komisyonu karşılanır)",
+                                text = "🎯 Hedef Çıkış: $${String.format(Locale.US, if (targetExit < 1.0) "%.4f" else "%.2f", targetExit)} (Net +%1.0 kâr + %0.40 Midas komisyonu karşılanır)",
                                 color = EmeraldProfit,
                                 fontSize = 11.sp,
                                 fontWeight = FontWeight.Bold
@@ -2491,6 +2790,7 @@ fun LiveAssistantScreen(
     isRefreshing: Boolean = false,
     onManualRefresh: () -> Unit = {},
     onOpenBudgetProposal: (CryptoAsset) -> Unit,
+    onOpenAssetDetails: (CryptoAsset) -> Unit = {},
     onOpenAddExistingDialog: () -> Unit,
     onRequestConfirmFill: (trade: AppTradeEntity) -> Unit = {},
     onCancelAmbush: (tradeId: Long) -> Unit = {},
@@ -2500,6 +2800,7 @@ fun LiveAssistantScreen(
     onDcaStep: (tradeId: Long, dcaPrice: Double, dcaAmount: Double) -> Unit
 ) {
     val context = LocalContext.current
+    val haptic = LocalHapticFeedback.current
     var selectedFilter by remember { mutableStateOf("ALL") }
 
     val filteredAssets = remember(assets, selectedFilter) {
@@ -2603,7 +2904,7 @@ fun LiveAssistantScreen(
                 }
             }
         }
-        // 1. TOP AI HERO "ŞİMDİ NE YAPMALIYIM?" LUXURY BANNER
+        // 1. TOP AI HERO "ŞİMDİ NE YAPMALIYIM?" LUXURY BANNER WITH SPACE RADAR
         item {
             Surface(
                 modifier = Modifier.fillMaxWidth(),
@@ -2611,93 +2912,107 @@ fun LiveAssistantScreen(
                 shape = RoundedCornerShape(16.dp),
                 border = BorderStroke(1.2.dp, Color(guidance.statusColorHex).copy(alpha = 0.8f))
             ) {
-                Column(
-                    modifier = Modifier
-                        .background(
-                            Brush.verticalGradient(
-                                colors = listOf(
-                                    Color(guidance.statusColorHex).copy(alpha = 0.08f),
-                                    Color.Transparent
-                                )
-                            )
-                        )
-                        .padding(16.dp),
-                    verticalArrangement = Arrangement.spacedBy(10.dp)
-                ) {
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.SpaceBetween,
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                            Icon(
-                                imageVector = Icons.Default.SmartToy,
-                                contentDescription = null,
-                                tint = Color(guidance.statusColorHex),
-                                modifier = Modifier.size(20.dp)
-                            )
-                            Text(
-                                text = "ŞİMDİ NE YAPMALIYIM?",
-                                color = Color(guidance.statusColorHex),
-                                fontSize = 12.sp,
-                                fontWeight = FontWeight.ExtraBold,
-                                fontFamily = FontFamily.Monospace
-                            )
-                        }
-
-                        Surface(
-                            color = Color(guidance.statusColorHex).copy(alpha = 0.15f),
-                            shape = RoundedCornerShape(8.dp),
-                            border = BorderStroke(0.8.dp, Color(guidance.statusColorHex))
-                        ) {
-                            Text(
-                                text = guidance.statusBadge,
-                                color = Color(guidance.statusColorHex),
-                                fontSize = 10.sp,
-                                fontWeight = FontWeight.Bold,
-                                fontFamily = FontFamily.Monospace,
-                                modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
-                            )
-                        }
-                    }
-
-                    Text(
-                        text = guidance.title,
-                        color = TextPrimary,
-                        fontSize = 14.5.sp,
-                        fontWeight = FontWeight.Bold,
-                        lineHeight = 20.sp
+                Box {
+                    // Subtle background Radar glow on top right
+                    SpaceRadarScanner(
+                        modifier = Modifier
+                            .align(Alignment.TopEnd)
+                            .size(110.dp)
+                            .padding(top = 6.dp, end = 6.dp),
+                        scannerColor = Color(guidance.statusColorHex)
                     )
 
-                    Surface(
-                        color = ObsidianBg,
-                        shape = RoundedCornerShape(10.dp),
-                        border = BorderStroke(0.6.dp, ObsidianBorder)
+                    Column(
+                        modifier = Modifier
+                            .background(
+                                Brush.verticalGradient(
+                                    colors = listOf(
+                                        Color(guidance.statusColorHex).copy(alpha = 0.08f),
+                                        Color.Transparent
+                                    )
+                                )
+                            )
+                            .padding(16.dp),
+                        verticalArrangement = Arrangement.spacedBy(10.dp)
                     ) {
-                        Column(modifier = Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                            Text(text = guidance.step1, color = TextPrimary.copy(alpha = 0.95f), fontSize = 11.5.sp, lineHeight = 16.sp)
-                            Text(text = guidance.step2, color = TextPrimary.copy(alpha = 0.95f), fontSize = 11.5.sp, lineHeight = 16.sp)
-                            Text(text = guidance.step3, color = TextPrimary.copy(alpha = 0.95f), fontSize = 11.5.sp, lineHeight = 16.sp)
-                        }
-                    }
-
-                    // If active trade hit target or pumping, show instant interactive close button
-                    if (activeTrades.isNotEmpty()) {
-                        val trade = activeTrades.first()
-                        val asset = assets.firstOrNull { it.symbol == trade.symbol }
-                        val currentPrice = if (asset != null && asset.rawPrice > 0) asset.rawPrice else trade.entryPrice
-
-                        Button(
-                            onClick = { onRequestConfirmSale(trade, currentPrice) },
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .height(42.dp),
-                            shape = RoundedCornerShape(10.dp),
-                            colors = ButtonDefaults.buttonColors(containerColor = EmeraldProfit, contentColor = Color.Black)
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
                         ) {
-                            Icon(imageVector = Icons.Default.CheckCircle, contentDescription = null, modifier = Modifier.size(18.dp))
-                            Spacer(modifier = Modifier.width(6.dp))
-                            Text("Midas'ta Satıldıysa Onayla & Kasaya Al", fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                                Icon(
+                                    imageVector = Icons.Default.SmartToy,
+                                    contentDescription = null,
+                                    tint = Color(guidance.statusColorHex),
+                                    modifier = Modifier.size(20.dp)
+                                )
+                                Text(
+                                    text = "ŞİMDİ NE YAPMALIYIM?",
+                                    color = Color(guidance.statusColorHex),
+                                    fontSize = 12.sp,
+                                    fontWeight = FontWeight.ExtraBold,
+                                    fontFamily = FontFamily.Monospace
+                                )
+                            }
+
+                            Surface(
+                                color = Color(guidance.statusColorHex).copy(alpha = 0.15f),
+                                shape = RoundedCornerShape(8.dp),
+                                border = BorderStroke(0.8.dp, Color(guidance.statusColorHex))
+                            ) {
+                                Text(
+                                    text = guidance.statusBadge,
+                                    color = Color(guidance.statusColorHex),
+                                    fontSize = 10.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    fontFamily = FontFamily.Monospace,
+                                    modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
+                                )
+                            }
+                        }
+
+                        Text(
+                            text = guidance.title,
+                            color = TextPrimary,
+                            fontSize = 14.5.sp,
+                            fontWeight = FontWeight.Bold,
+                            lineHeight = 20.sp
+                        )
+
+                        Surface(
+                            color = ObsidianBg.copy(alpha = 0.92f),
+                            shape = RoundedCornerShape(10.dp),
+                            border = BorderStroke(0.6.dp, ObsidianBorder)
+                        ) {
+                            Column(modifier = Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                                Text(text = guidance.step1, color = TextPrimary.copy(alpha = 0.95f), fontSize = 11.5.sp, lineHeight = 16.sp)
+                                Text(text = guidance.step2, color = TextPrimary.copy(alpha = 0.95f), fontSize = 11.5.sp, lineHeight = 16.sp)
+                                Text(text = guidance.step3, color = TextPrimary.copy(alpha = 0.95f), fontSize = 11.5.sp, lineHeight = 16.sp)
+                            }
+                        }
+
+                        // If active trade hit target or pumping, show instant interactive close button
+                        if (activeTrades.isNotEmpty()) {
+                            val trade = activeTrades.first()
+                            val asset = assets.firstOrNull { it.symbol == trade.symbol }
+                            val currentPrice = if (asset != null && asset.rawPrice > 0) asset.rawPrice else trade.entryPrice
+
+                            Button(
+                                onClick = {
+                                    haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+                                    onRequestConfirmSale(trade, currentPrice)
+                                },
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .height(42.dp),
+                                shape = RoundedCornerShape(10.dp),
+                                colors = ButtonDefaults.buttonColors(containerColor = EmeraldProfit, contentColor = Color.Black)
+                            ) {
+                                Icon(imageVector = Icons.Default.CheckCircle, contentDescription = null, modifier = Modifier.size(18.dp))
+                                Spacer(modifier = Modifier.width(6.dp))
+                                Text("Midas'ta Satıldıysa Onayla & Kasaya Al", fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                            }
                         }
                     }
                 }
@@ -3060,13 +3375,130 @@ fun LiveAssistantScreen(
             }
         }
 
+        // TOP ELITE 5 HEATMAP
+        item {
+            Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                        Text(
+                            text = "🔥 MAJÖR ISI HARİTASI (HEATMAP)",
+                            color = TextPrimary,
+                            fontSize = 11.sp,
+                            fontWeight = FontWeight.ExtraBold,
+                            fontFamily = FontFamily.Monospace
+                        )
+                        Surface(
+                            color = EmeraldProfit.copy(alpha = 0.15f),
+                            shape = RoundedCornerShape(4.dp)
+                        ) {
+                            Text(
+                                text = "5 Majör",
+                                color = EmeraldProfitBright,
+                                fontSize = 8.5.sp,
+                                fontWeight = FontWeight.Bold,
+                                modifier = Modifier.padding(horizontal = 5.dp, vertical = 2.dp)
+                            )
+                        }
+                    }
+                    Text(
+                        text = "Strateji Odası için tıkla ➔",
+                        color = IceCyanBright,
+                        fontSize = 9.sp,
+                        fontWeight = FontWeight.Medium
+                    )
+                }
+
+                LazyRow(
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    contentPadding = PaddingValues(horizontal = 2.dp)
+                ) {
+                    items(assets, key = { "heat_${it.symbol}" }) { asset ->
+                        val oracle = oracleMap[asset.symbol]
+                        val tech = techMap[asset.symbol]
+                        val price = if (asset.rawPrice > 0) asset.rawPrice else (oracle?.binanceGlobalPrice ?: 0.0)
+                        val isBullish = asset.isPositive
+                        val buyerRatio = ((tech?.orderBookDepth?.bidRatio ?: 0.50) * 100.0).coerceIn(0.0, 100.0)
+                        val rsiVal = tech?.rsi14 ?: 50.0
+
+                        val badgeText = when {
+                            buyerRatio >= 60.0 -> "🎯 %${String.format(Locale.US, "%.0f", buyerRatio)} Alıcı"
+                            rsiVal <= 35.0 -> "🛡️ RSI Dip"
+                            tech?.zScore != null && tech.zScore < -1.0 -> "⚡ Z-Dip"
+                            else -> "⚡ EMA9"
+                        }
+
+                        Surface(
+                            modifier = Modifier
+                                .width(128.dp)
+                                .clickable { onOpenAssetDetails(asset) },
+                            color = ObsidianCard,
+                            shape = RoundedCornerShape(12.dp),
+                            border = BorderStroke(1.dp, if (isBullish) EmeraldProfit.copy(alpha = 0.5f) else CoralRed.copy(alpha = 0.4f))
+                        ) {
+                            Column(
+                                modifier = Modifier.padding(10.dp),
+                                verticalArrangement = Arrangement.spacedBy(4.dp)
+                            ) {
+                                Row(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    horizontalArrangement = Arrangement.SpaceBetween,
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    Text(
+                                        text = asset.symbol,
+                                        color = Color.White,
+                                        fontSize = 12.sp,
+                                        fontWeight = FontWeight.ExtraBold,
+                                        fontFamily = FontFamily.Monospace
+                                    )
+                                    Text(
+                                        text = asset.changeFormatted,
+                                        color = if (isBullish) EmeraldProfitBright else CoralRedBright,
+                                        fontSize = 10.sp,
+                                        fontWeight = FontWeight.Bold,
+                                        fontFamily = FontFamily.Monospace
+                                    )
+                                }
+
+                                Text(
+                                    text = "$${String.format(Locale.US, if (price < 1.0) "%.4f" else "%.2f", price)}",
+                                    color = TextPrimary,
+                                    fontSize = 13.sp,
+                                    fontWeight = FontWeight.ExtraBold,
+                                    fontFamily = FontFamily.Monospace
+                                )
+
+                                Surface(
+                                    color = ObsidianCardElevated,
+                                    shape = RoundedCornerShape(4.dp),
+                                    border = BorderStroke(0.6.dp, if (isBullish) EmeraldProfit.copy(alpha = 0.4f) else ObsidianBorder)
+                                ) {
+                                    Text(
+                                        text = badgeText,
+                                        color = if (isBullish) EmeraldProfitBright else IceCyanBright,
+                                        fontSize = 8.5.sp,
+                                        fontWeight = FontWeight.Bold,
+                                        modifier = Modifier.padding(horizontal = 4.dp, vertical = 2.dp)
+                                    )
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
         // Quick Pair Filter Chips
         item {
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.spacedBy(6.dp)
             ) {
-                listOf("ALL" to "Tümü", "SOL" to "SOL", "BTC" to "BTC", "ETH" to "ETH", "AVAX" to "AVAX", "XRP" to "XRP").forEach { (code, label) ->
+                listOf("ALL" to "Tümü", "BTC" to "BTC", "ETH" to "ETH", "BNB" to "BNB", "LINK" to "LINK", "AVAX" to "AVAX").forEach { (code, label) ->
                     val isSelected = selectedFilter == code
                     Surface(
                         modifier = Modifier
@@ -3114,7 +3546,9 @@ fun LiveAssistantScreen(
             } else 0.0
 
             Surface(
-                modifier = Modifier.fillMaxWidth(),
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clickable { onOpenAssetDetails(asset) },
                 color = ObsidianSurface,
                 shape = RoundedCornerShape(14.dp),
                 border = BorderStroke(1.dp, ObsidianBorder)
@@ -3178,14 +3612,42 @@ fun LiveAssistantScreen(
                         }
                     }
 
-                    // LIVE MINI SPARKLINE CHART
-                    MiniSparkline(
-                        points = asset.sparklinePoints,
-                        lineColor = if (asset.isPositive) EmeraldProfit else CoralRed,
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .height(40.dp)
-                    )
+                    // LIVE 5M CANDLESTICK CHART (Binance OHLCV + VWAP + EMA9)
+                    Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                                Text("5Dk Mumlar (OHLCV)", color = TextTertiary, fontSize = 9.sp, fontFamily = FontFamily.Monospace)
+                                if ((asset.volumeMomentum ?: 1.0) > 1.25) {
+                                    Surface(
+                                        color = EmeraldProfit.copy(alpha = 0.2f),
+                                        shape = RoundedCornerShape(4.dp),
+                                        border = BorderStroke(0.6.dp, EmeraldProfitBright)
+                                    ) {
+                                        Text(
+                                            text = "🚀 Hacim %${String.format(Locale.US, "%.0f", ((asset.volumeMomentum ?: 1.0) - 1.0) * 100)} Artış",
+                                            color = EmeraldProfitBright,
+                                            fontSize = 8.sp,
+                                            fontWeight = FontWeight.ExtraBold,
+                                            modifier = Modifier.padding(horizontal = 4.dp, vertical = 1.dp)
+                                        )
+                                    }
+                                }
+                            }
+                            Text("🔍 Yakınlaştır / Kaydır", color = IceCyanBright, fontSize = 9.sp, fontWeight = FontWeight.Bold)
+                        }
+                        CandlestickChart(
+                            candles = asset.recentCandles,
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .height(56.dp),
+                            isDetailed = true,
+                            vwapPrice = tech?.vwap ?: asset.vwap
+                        )
+                    }
 
                     // PROMINENT ENTRY & EXIT TARGET CARDS
                     Row(
@@ -3902,6 +4364,17 @@ fun MemoryAndArchiveScreen(
 ) {
     val dateFormatter = remember { SimpleDateFormat("dd MMM HH:mm", Locale.getDefault()) }
 
+    val successfulTrades = remember(historicalTrades) {
+        historicalTrades.count { it.status == "COMPLETED_PROFIT" || it.netProfitUsdt >= 0 }
+    }
+    val failedTrades = remember(historicalTrades) {
+        historicalTrades.count { it.status == "COMPLETED_LOSS" || it.netProfitUsdt < 0 }
+    }
+    val totalFinished = successfulTrades + failedTrades
+    val winRate = remember(successfulTrades, totalFinished) {
+        if (totalFinished > 0) (successfulTrades.toDouble() / totalFinished.toDouble()) * 100.0 else 100.0
+    }
+
     LazyColumn(
         modifier = Modifier
             .fillMaxSize()
@@ -3909,7 +4382,25 @@ fun MemoryAndArchiveScreen(
         contentPadding = PaddingValues(vertical = 12.dp),
         verticalArrangement = Arrangement.spacedBy(12.dp)
     ) {
+        // 1. NATIVE CANVAS VISUALIZATIONS: EQUITY CURVE & WIN RATE DONUT
         item {
+            EquityGrowthCurveChart(
+                historicalTrades = historicalTrades,
+                modifier = Modifier.fillMaxWidth()
+            )
+        }
+
+        item {
+            WinRateDonutChart(
+                successfulTrades = successfulTrades,
+                failedTrades = failedTrades,
+                winRatePercent = winRate,
+                modifier = Modifier.fillMaxWidth()
+            )
+        }
+
+        item {
+            Spacer(modifier = Modifier.height(4.dp))
             Text(
                 text = "🧠 COIN HAFIZASI & KARNE KARTLARI",
                 color = TextPrimary,
@@ -4250,5 +4741,637 @@ fun MiniSparkline(
             color = lineColor,
             style = Stroke(width = 2.dp.toPx())
         )
+    }
+}
+
+/**
+ * Pure Jetpack Compose Canvas Candlestick Chart for 5m Binance OHLCV data.
+ * Features:
+ * - Interactive Pinch-to-Zoom & Pan gestures.
+ * - High-low wicks and open-close candle bodies (Bullish Emerald vs Bearish Coral).
+ * - Smooth Yellow EMA9 line overlay across candles.
+ * - Cyan VWAP (Volume-Weighted Average Price) overlay line.
+ * - Translucent Cyan Bollinger Band cloud in the background.
+ */
+@Composable
+fun CandlestickChart(
+    candles: List<CandleStick>,
+    modifier: Modifier = Modifier,
+    isDetailed: Boolean = false,
+    vwapPrice: Double? = null
+) {
+    if (candles.isEmpty()) {
+        Box(
+            modifier = modifier
+                .background(ObsidianCardElevated.copy(alpha = 0.5f), RoundedCornerShape(8.dp)),
+            contentAlignment = Alignment.Center
+        ) {
+            Text("📊 5m Mum Verisi Yükleniyor...", color = TextTertiary, fontSize = 10.sp)
+        }
+        return
+    }
+
+    var scale by remember { mutableFloatStateOf(1f) }
+    var offsetX by remember { mutableFloatStateOf(0f) }
+
+    Box(modifier = modifier) {
+        Canvas(
+            modifier = Modifier
+                .fillMaxSize()
+                .pointerInput(Unit) {
+                    detectTransformGestures { _, pan, zoom, _ ->
+                        scale = (scale * zoom).coerceIn(0.6f, 4.5f)
+                        offsetX += pan.x
+                    }
+                }
+        ) {
+            val width = size.width
+            val height = size.height
+            if (width <= 0f || height <= 0f) return@Canvas
+
+            val minPrice = candles.minOfOrNull { it.low }?.toFloat() ?: 0f
+            val maxPrice = candles.maxOfOrNull { it.high }?.toFloat() ?: 1f
+            val priceRange = (maxPrice - minPrice).let { if (it <= 0f) 1f else it }
+
+            val candleCount = candles.size
+            val baseCandleSpacing = width / candleCount.toFloat()
+            val candleSpacing = baseCandleSpacing * scale
+            val candleBodyWidth = (candleSpacing * 0.62f).coerceIn(2.dp.toPx(), 18.dp.toPx())
+            val wickWidth = if (isDetailed) 1.5.dp.toPx() else 1.2.dp.toPx()
+
+            val padY = if (isDetailed) 10.dp.toPx() else 4.dp.toPx()
+            val usableHeight = (height - (padY * 2)).coerceAtLeast(1f)
+
+            fun priceToY(price: Double): Float {
+                val normalized = ((price.toFloat() - minPrice) / priceRange)
+                return height - padY - (normalized * usableHeight)
+            }
+
+            // 1. Calculate and draw translucent Bollinger Band cloud (if detailed)
+            if (isDetailed && candles.size >= 5) {
+                val bbUpperPath = Path()
+                val bbLowerPath = Path()
+                val bbCloudPath = Path()
+
+                val bbUpperPoints = mutableListOf<Offset>()
+                val bbLowerPoints = mutableListOf<Offset>()
+
+                candles.forEachIndexed { i, candle ->
+                    val centerX = (i * candleSpacing) + (candleSpacing / 2f) + offsetX
+                    val lookback = candles.subList(maxOf(0, i - 9), i + 1)
+                    val mean = lookback.map { it.close }.average()
+                    val std = Math.sqrt(lookback.map { Math.pow(it.close - mean, 2.0) }.average()).coerceAtLeast(mean * 0.0015)
+                    val upper = mean + (1.8 * std)
+                    val lower = mean - (1.8 * std)
+
+                    val upperY = priceToY(upper)
+                    val lowerY = priceToY(lower)
+
+                    bbUpperPoints.add(Offset(centerX, upperY))
+                    bbLowerPoints.add(Offset(centerX, lowerY))
+                }
+
+                if (bbUpperPoints.isNotEmpty()) {
+                    bbCloudPath.moveTo(bbUpperPoints.first().x, bbUpperPoints.first().y)
+                    bbUpperPoints.forEach { bbCloudPath.lineTo(it.x, it.y) }
+                    for (i in bbLowerPoints.size - 1 downTo 0) {
+                        bbCloudPath.lineTo(bbLowerPoints[i].x, bbLowerPoints[i].y)
+                    }
+                    bbCloudPath.close()
+
+                    drawPath(
+                        path = bbCloudPath,
+                        color = IceCyan.copy(alpha = 0.09f)
+                    )
+                }
+            }
+
+            // 2. Draw Candlesticks (Wicks and Bodies)
+            candles.forEachIndexed { index, candle ->
+                val centerX = (index * candleSpacing) + (candleSpacing / 2f) + offsetX
+                if (centerX < -30f || centerX > width + 30f) return@forEachIndexed
+
+                val isBullish = candle.close >= candle.open
+                val candleColor = if (isBullish) EmeraldProfit else CoralRed
+
+                val highY = priceToY(candle.high)
+                val lowY = priceToY(candle.low)
+                val openY = priceToY(candle.open)
+                val closeY = priceToY(candle.close)
+
+                // Upper & Lower Wick
+                drawLine(
+                    color = candleColor,
+                    start = Offset(centerX, highY),
+                    end = Offset(centerX, lowY),
+                    strokeWidth = wickWidth
+                )
+
+                // Real Body Rect
+                val topBodyY = minOf(openY, closeY)
+                val bottomBodyY = maxOf(openY, closeY)
+                val bodyHeight = (bottomBodyY - topBodyY).coerceAtLeast(2.dp.toPx())
+
+                drawRect(
+                    color = candleColor,
+                    topLeft = Offset(centerX - (candleBodyWidth / 2f), topBodyY),
+                    size = Size(candleBodyWidth, bodyHeight)
+                )
+            }
+
+            // 3. Draw Yellow EMA9 Overlay Line
+            if (candles.size >= 3) {
+                val emaPath = Path()
+                val alphaMultiplier = 2.0 / (9.0 + 1.0)
+                var currentEma = candles.first().close
+
+                candles.forEachIndexed { index, candle ->
+                    val centerX = (index * candleSpacing) + (candleSpacing / 2f) + offsetX
+                    currentEma = (candle.close * alphaMultiplier) + (currentEma * (1.0 - alphaMultiplier))
+                    val emaY = priceToY(currentEma)
+
+                    if (index == 0) {
+                        emaPath.moveTo(centerX, emaY)
+                    } else {
+                        emaPath.lineTo(centerX, emaY)
+                    }
+                }
+
+                drawPath(
+                    path = emaPath,
+                    color = GoldWarm,
+                    style = Stroke(width = if (isDetailed) 2.2.dp.toPx() else 1.5.dp.toPx())
+                )
+            }
+
+            // 4. Draw VWAP Horizontal or Multi-Point Overlay
+            if (isDetailed && vwapPrice != null && vwapPrice > 0) {
+                val vwapY = priceToY(vwapPrice)
+                drawLine(
+                    color = IceCyanBright.copy(alpha = 0.85f),
+                    start = Offset(0f, vwapY),
+                    end = Offset(width, vwapY),
+                    strokeWidth = 1.6.dp.toPx()
+                )
+            }
+        }
+
+        // Reset Zoom & Pan Overlay Pill
+        if (scale != 1f || offsetX != 0f) {
+            Surface(
+                modifier = Modifier
+                    .align(Alignment.TopEnd)
+                    .padding(4.dp)
+                    .clickable {
+                        scale = 1f
+                        offsetX = 0f
+                    },
+                color = ObsidianSurface.copy(alpha = 0.85f),
+                shape = RoundedCornerShape(6.dp),
+                border = BorderStroke(0.8.dp, IceCyanBright)
+            ) {
+                Row(
+                    modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Icon(Icons.Default.Refresh, contentDescription = "Sıfırla", tint = IceCyanBright, modifier = Modifier.size(10.dp))
+                    Spacer(modifier = Modifier.width(3.dp))
+                    Text("Yakınlaştırma Sıfırla (%${String.format(Locale.US, "%.0f", scale * 100)})", color = IceCyanBright, fontSize = 8.5.sp)
+                }
+            }
+        }
+    }
+}
+
+/**
+ * Pure Jetpack Compose Canvas Capital Growth (Equity Curve) Chart.
+ * Displays cumulative net profit over historical closed trades with glowing PathMeasure laser animation.
+ */
+@Composable
+fun EquityGrowthCurveChart(
+    historicalTrades: List<AppTradeEntity>,
+    modifier: Modifier = Modifier
+) {
+    val completedTrades = remember(historicalTrades) {
+        historicalTrades.filter { it.status == "COMPLETED_PROFIT" || it.status == "COMPLETED_LOSS" }
+            .sortedBy { it.closedAt ?: it.openedAt }
+    }
+
+    if (completedTrades.isEmpty()) {
+        Surface(
+            modifier = modifier,
+            color = ObsidianCardElevated,
+            shape = RoundedCornerShape(12.dp),
+            border = BorderStroke(1.dp, ObsidianBorder)
+        ) {
+            Box(modifier = Modifier.fillMaxSize().padding(16.dp), contentAlignment = Alignment.Center) {
+                Text(
+                    text = "📈 İlk kârlı işlemler kapandığında Sermaye Büyüme Eğrisi burada lazer animasyonuyla çizilecektir.",
+                    color = TextSecondary,
+                    fontSize = 11.sp,
+                    textAlign = TextAlign.Center
+                )
+            }
+        }
+        return
+    }
+
+    // Cumulative profit series
+    val cumulativeSeries = remember(completedTrades) {
+        var runningProfit = 0.0
+        val list = mutableListOf(0.0)
+        completedTrades.forEach { trade ->
+            runningProfit += trade.netProfitUsdt
+            list.add(runningProfit)
+        }
+        list
+    }
+
+    val totalPnl = cumulativeSeries.last()
+    val isProfitable = totalPnl >= 0.0
+    val curveColor = if (isProfitable) EmeraldProfit else CoralRed
+
+    // Laser Animation Transition
+    val animProgress = remember { Animatable(0f) }
+    LaunchedEffect(completedTrades.size) {
+        animProgress.snapTo(0f)
+        animProgress.animateTo(
+            targetValue = 1f,
+            animationSpec = tween(durationMillis = 1400, easing = FastOutSlowInEasing)
+        )
+    }
+
+    Surface(
+        modifier = modifier,
+        color = ObsidianCard,
+        shape = RoundedCornerShape(14.dp),
+        border = BorderStroke(1.dp, curveColor.copy(alpha = 0.5f))
+    ) {
+        Column(modifier = Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Column {
+                    Text(
+                        text = "📈 SERMAYE BÜYÜME EĞRİSİ (EQUITY CURVE)",
+                        color = TextPrimary,
+                        fontSize = 11.5.sp,
+                        fontWeight = FontWeight.ExtraBold,
+                        fontFamily = FontFamily.Monospace
+                    )
+                    Text(
+                        text = "${completedTrades.size} Tamamlanmış İşlem Kümülatif Net Kâr",
+                        color = TextSecondary,
+                        fontSize = 10.sp
+                    )
+                }
+                Text(
+                    text = "${if (totalPnl >= 0) "+" else ""}$${String.format(Locale.US, "%.2f", totalPnl)} USDT",
+                    color = curveColor,
+                    fontSize = 14.sp,
+                    fontWeight = FontWeight.ExtraBold,
+                    fontFamily = FontFamily.Monospace
+                )
+            }
+
+            Canvas(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(95.dp)
+            ) {
+                val width = size.width
+                val height = size.height
+                if (width <= 0f || height <= 0f) return@Canvas
+
+                val minVal = cumulativeSeries.minOrNull()?.toFloat() ?: 0f
+                val maxVal = cumulativeSeries.maxOrNull()?.toFloat() ?: 1f
+                val range = (maxVal - minVal).let { if (it <= 0f) 1f else it }
+
+                val padY = 8.dp.toPx()
+                val usableH = height - (padY * 2)
+
+                fun valToY(v: Double): Float {
+                    val norm = ((v.toFloat() - minVal) / range)
+                    return height - padY - (norm * usableH)
+                }
+
+                val stepX = width / (cumulativeSeries.size - 1).coerceAtLeast(1)
+
+                val fullLinePath = Path()
+                val fullAreaPath = Path()
+
+                cumulativeSeries.forEachIndexed { i, value ->
+                    val x = i * stepX
+                    val y = valToY(value)
+
+                    if (i == 0) {
+                        fullLinePath.moveTo(x, y)
+                        fullAreaPath.moveTo(x, height)
+                        fullAreaPath.lineTo(x, y)
+                    } else {
+                        fullLinePath.lineTo(x, y)
+                        fullAreaPath.lineTo(x, y)
+                    }
+
+                    if (i == cumulativeSeries.size - 1) {
+                        fullAreaPath.lineTo(x, height)
+                        fullAreaPath.close()
+                    }
+                }
+
+                // PathMeasure for smooth laser drawing
+                val pathMeasure = PathMeasure()
+                pathMeasure.setPath(fullLinePath, false)
+                val totalLength = pathMeasure.length
+                val currentLength = totalLength * animProgress.value
+
+                val animatedLinePath = Path()
+                pathMeasure.getSegment(0f, currentLength, animatedLinePath, true)
+
+                // Draw Gradient Fill Under Equity Line (alpha modulated by animation progress)
+                drawPath(
+                    path = fullAreaPath,
+                    brush = Brush.verticalGradient(
+                        colors = listOf(
+                            curveColor.copy(alpha = 0.25f * animProgress.value),
+                            Color.Transparent
+                        )
+                    )
+                )
+
+                // Draw Glowing Laser Stroke
+                drawPath(
+                    path = animatedLinePath,
+                    color = curveColor.copy(alpha = 0.35f),
+                    style = Stroke(width = 6.dp.toPx())
+                )
+                drawPath(
+                    path = animatedLinePath,
+                    color = curveColor,
+                    style = Stroke(width = 2.5.dp.toPx())
+                )
+
+                // Laser Head Glowing Pulse Marker
+                if (animProgress.value > 0.02f) {
+                    val headPoint = pathMeasure.getPosition(currentLength)
+                    drawCircle(
+                        color = curveColor.copy(alpha = 0.45f),
+                        radius = 8.dp.toPx(),
+                        center = headPoint
+                    )
+                    drawCircle(
+                        color = curveColor,
+                        radius = 4.5.dp.toPx(),
+                        center = headPoint
+                    )
+                    drawCircle(
+                        color = Color.White,
+                        radius = 2.dp.toPx(),
+                        center = headPoint
+                    )
+                }
+            }
+        }
+    }
+}
+
+/**
+ * Pure Jetpack Compose Canvas Win Rate Donut / Pie Chart.
+ * Displays green for profit trades and red for loss trades with high-contrast center metric.
+ */
+@Composable
+fun WinRateDonutChart(
+    successfulTrades: Int,
+    failedTrades: Int,
+    winRatePercent: Double,
+    modifier: Modifier = Modifier
+) {
+    val total = (successfulTrades + failedTrades).coerceAtLeast(1)
+    val winSweep = ((successfulTrades.toFloat() / total.toFloat()) * 360f).coerceIn(0f, 360f)
+    val lossSweep = 360f - winSweep
+
+    Surface(
+        modifier = modifier,
+        color = ObsidianCard,
+        shape = RoundedCornerShape(14.dp),
+        border = BorderStroke(1.dp, ObsidianBorder)
+    ) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(14.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.SpaceBetween
+        ) {
+            // Donut Chart with Center Text
+            Box(
+                modifier = Modifier.size(90.dp),
+                contentAlignment = Alignment.Center
+            ) {
+                Canvas(modifier = Modifier.fillMaxSize()) {
+                    val strokeW = 12.dp.toPx()
+                    val pad = strokeW / 2f
+                    val arcSize = Size(size.width - strokeW, size.height - strokeW)
+                    val arcTopLeft = Offset(pad, pad)
+
+                    if (successfulTrades == 0 && failedTrades == 0) {
+                        // Empty base
+                        drawArc(
+                            color = ObsidianBorder,
+                            startAngle = 0f,
+                            sweepAngle = 360f,
+                            useCenter = false,
+                            topLeft = arcTopLeft,
+                            size = arcSize,
+                            style = Stroke(width = strokeW)
+                        )
+                    } else {
+                        // Win Arc (Green)
+                        if (winSweep > 0f) {
+                            drawArc(
+                                color = EmeraldProfit,
+                                startAngle = -90f,
+                                sweepAngle = winSweep,
+                                useCenter = false,
+                                topLeft = arcTopLeft,
+                                size = arcSize,
+                                style = Stroke(width = strokeW)
+                            )
+                        }
+                        // Loss Arc (Red)
+                        if (lossSweep > 0f) {
+                            drawArc(
+                                color = CoralRed,
+                                startAngle = -90f + winSweep,
+                                sweepAngle = lossSweep,
+                                useCenter = false,
+                                topLeft = arcTopLeft,
+                                size = arcSize,
+                                style = Stroke(width = strokeW)
+                            )
+                        }
+                    }
+                }
+
+                Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                    Text(
+                        text = "%${String.format(Locale.US, "%.0f", winRatePercent)}",
+                        color = if (winRatePercent >= 70.0) EmeraldProfitBright else GoldWarm,
+                        fontSize = 13.sp,
+                        fontWeight = FontWeight.ExtraBold,
+                        fontFamily = FontFamily.Monospace
+                    )
+                    Text(
+                        text = "Kazanma",
+                        color = TextTertiary,
+                        fontSize = 8.5.sp
+                    )
+                }
+            }
+
+            // Legend & Breakdown Stats
+            Column(
+                modifier = Modifier.weight(1f).padding(start = 14.dp),
+                verticalArrangement = Arrangement.spacedBy(6.dp)
+            ) {
+                Text(
+                    text = "🎯 İŞLEM KARNESİ",
+                    color = TextPrimary,
+                    fontSize = 11.5.sp,
+                    fontWeight = FontWeight.ExtraBold,
+                    fontFamily = FontFamily.Monospace
+                )
+
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(5.dp)) {
+                        Box(modifier = Modifier.size(8.dp).clip(CircleShape).background(EmeraldProfit))
+                        Text("Kârlı Kapanan:", color = TextSecondary, fontSize = 10.5.sp)
+                    }
+                    Text("$successfulTrades İşlem", color = EmeraldProfitBright, fontSize = 11.sp, fontWeight = FontWeight.Bold, fontFamily = FontFamily.Monospace)
+                }
+
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(5.dp)) {
+                        Box(modifier = Modifier.size(8.dp).clip(CircleShape).background(CoralRed))
+                        Text("Zararlı Kapanan:", color = TextSecondary, fontSize = 10.5.sp)
+                    }
+                    Text("$failedTrades İşlem", color = CoralRedBright, fontSize = 11.sp, fontWeight = FontWeight.Bold, fontFamily = FontFamily.Monospace)
+                }
+
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Text("Sıfır Zarar Disiplini:", color = TextTertiary, fontSize = 9.5.sp)
+                    Text("3 Kademe DCA", color = IceCyanBright, fontSize = 9.5.sp, fontWeight = FontWeight.Bold)
+                }
+            }
+        }
+    }
+}
+
+/**
+ * Holographic Space Station Tech Radar Scanner.
+ * Displays rotating radar beam, concentric range rings, and real-time pulsing market target blips.
+ */
+@Composable
+fun SpaceRadarScanner(
+    modifier: Modifier = Modifier,
+    scannerColor: Color = IceCyanBright,
+    detectedTargets: List<Offset> = listOf(Offset(0.35f, 0.45f), Offset(0.65f, 0.3f), Offset(0.5f, 0.7f))
+) {
+    val infiniteTransition = rememberInfiniteTransition(label = "radar")
+    val angle by infiniteTransition.animateFloat(
+        initialValue = 0f,
+        targetValue = 360f,
+        animationSpec = infiniteRepeatable(
+            animation = tween(4000, easing = LinearEasing)
+        ),
+        label = "radarAngle"
+    )
+    val pulse by infiniteTransition.animateFloat(
+        initialValue = 0.4f,
+        targetValue = 1f,
+        animationSpec = infiniteRepeatable(
+            animation = tween(1200, easing = FastOutSlowInEasing),
+            repeatMode = RepeatMode.Reverse
+        ),
+        label = "radarPulse"
+    )
+
+    Canvas(modifier = modifier) {
+        val width = size.width
+        val height = size.height
+        val center = Offset(width / 2f, height / 2f)
+        val radius = minOf(width, height) / 2f
+
+        // 1. Concentric rings
+        val rings = listOf(0.35f, 0.65f, 0.95f)
+        rings.forEach { rFactor ->
+            drawCircle(
+                color = scannerColor.copy(alpha = 0.18f),
+                radius = radius * rFactor,
+                center = center,
+                style = Stroke(width = 1.dp.toPx())
+            )
+        }
+
+        // 2. Crosshair grid
+        drawLine(
+            color = scannerColor.copy(alpha = 0.20f),
+            start = Offset(center.x - radius, center.y),
+            end = Offset(center.x + radius, center.y),
+            strokeWidth = 1.dp.toPx()
+        )
+        drawLine(
+            color = scannerColor.copy(alpha = 0.20f),
+            start = Offset(center.x, center.y - radius),
+            end = Offset(center.x, center.y + radius),
+            strokeWidth = 1.dp.toPx()
+        )
+
+        // 3. Rotating Sweep Gradient Beam
+        drawArc(
+            brush = Brush.sweepGradient(
+                colors = listOf(
+                    Color.Transparent,
+                    scannerColor.copy(alpha = 0.03f),
+                    scannerColor.copy(alpha = 0.35f)
+                ),
+                center = center
+            ),
+            startAngle = angle - 60f,
+            sweepAngle = 60f,
+            useCenter = true,
+            topLeft = Offset(center.x - radius, center.y - radius),
+            size = Size(radius * 2, radius * 2)
+        )
+
+        // 4. Target Blips
+        detectedTargets.forEach { targetRel ->
+            val targetX = center.x + (targetRel.x - 0.5f) * radius * 1.5f
+            val targetY = center.y + (targetRel.y - 0.5f) * radius * 1.5f
+            drawCircle(
+                color = EmeraldProfitBright.copy(alpha = 0.35f * pulse),
+                radius = 6.dp.toPx() * pulse,
+                center = Offset(targetX, targetY)
+            )
+            drawCircle(
+                color = EmeraldProfitBright,
+                radius = 2.5.dp.toPx(),
+                center = Offset(targetX, targetY)
+            )
+        }
     }
 }
