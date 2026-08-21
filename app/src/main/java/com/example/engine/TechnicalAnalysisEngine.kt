@@ -91,7 +91,7 @@ object TechnicalAnalysisEngine {
 
         // 8. Order Book Depth & Internal Sentiment Filter
         val currentOrderBook = orderBook ?: OrderBookDepth(symbol = symbol)
-        val isOrderBookFear = currentOrderBook.bidRatio < 0.60
+        val isOrderBookFear = currentOrderBook.bidRatio < 0.50
 
         // 9. Institutional Volume Profile Node (Point of Control)
         val recentCandles = candles5m.takeLast(min(20, candles5m.size))
@@ -132,12 +132,12 @@ object TechnicalAnalysisEngine {
         if (isZScoreDip) score += 15
         if (isPriceBelowBollingerLower) score += 10
 
-        // Order Book conditions (> 60% buyer wall)
-        if (currentOrderBook.bidRatio >= 0.65) score += 10
-        else if (isOrderBookFear) score -= 25 // Penalize if seller pressure dominates
+        // Order Book conditions (> 55% buyer wall)
+        if (currentOrderBook.bidRatio >= 0.55) score += 10
+        else if (isOrderBookFear) score -= 20 // Penalize if severe seller pressure dominates
 
         // Volume shock penalty
-        if (isVolumeShock) score -= 35 // Hold off knife catch
+        if (isVolumeShock) score -= 30 // Hold off knife catch
 
         // Distance to support
         if (distanceToSupport <= 0.40) score += 10
@@ -148,9 +148,9 @@ object TechnicalAnalysisEngine {
 
         val recommendation = when {
             isVolumeShock -> "⚠️ BEKLE (HACİMLİ SATIŞ ŞOKU - BIÇAĞI TUTMA)"
-            isOrderBookFear -> "⚠️ BEKLE (TAHTADA ALICI DUVARI <%60 - BASKI VAR)"
+            isOrderBookFear -> "⚠️ BEKLE (TAHTADA ALICI DUVARI <%50 - BASKI VAR)"
             finalScore >= 75 -> "🎯 GÜÇLÜ PUSU GİRİŞİ (RSI+BB+Z-SCORE ONAYLI)"
-            finalScore >= 60 -> "🟢 KADEMELİ PUSU ALIMI UYGUN"
+            finalScore >= 55 -> "🟢 KADEMELİ PUSU ALIMI UYGUN"
             isOverboughtRisk -> "🔴 DİRENÇ / KÂR AL BÖLGESİ"
             else -> "⏳ BEKLE (PİSAYADA NET DİP HENÜZ OLUŞMADI)"
         }

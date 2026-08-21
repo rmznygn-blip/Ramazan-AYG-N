@@ -112,6 +112,7 @@ class MainActivity : ComponentActivity() {
     }
 }
 
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun CryptoAnalystMasterApp() {
     val context = LocalContext.current
@@ -557,7 +558,7 @@ fun CryptoAnalystMasterApp() {
                 )
             }
 
-            // 1.5 MODAL: STRATEJİ ODASI (WAR ROOM) - 5m Candlestick Chart & Educational AI Mentor
+            // 1.5 MODAL: STRATEJİ ODASI (WAR ROOM) - 5m Candlestick Chart & Educational AI Mentor (ModalBottomSheet)
             selectedAssetDetails?.let { asset ->
                 val tech = technicalAnalysisMap[asset.symbol]
                 val oracle = binanceOracleMap[asset.symbol]
@@ -572,17 +573,29 @@ fun CryptoAnalystMasterApp() {
                     AiAdvisorEngine.calculateOptimalAmbushTimeout(asset, tech)
                 }
 
-                val buyerRatio = ((tech?.orderBookDepth?.bidRatio ?: 0.65) * 100.0).coerceIn(10.0, 90.0)
+                val buyerRatio = ((tech?.orderBookDepth?.bidRatio ?: 0.55) * 100.0).coerceIn(10.0, 90.0)
                 val sellerRatio = (100.0 - buyerRatio).coerceIn(10.0, 90.0)
                 val zScoreVal = tech?.zScore ?: 0.0
                 val atrVal = tech?.atr14 ?: (currentPrice * 0.008)
                 val rsiVal = tech?.rsi14 ?: 50.0
 
-                AlertDialog(
+                ModalBottomSheet(
                     onDismissRequest = { selectedAssetDetails = null },
                     containerColor = ObsidianCard,
-                    shape = RoundedCornerShape(18.dp),
-                    title = {
+                    dragHandle = {
+                        BottomSheetDefaults.DragHandle(color = IceCyanBright.copy(alpha = 0.6f))
+                    },
+                    shape = RoundedCornerShape(topStart = 22.dp, topEnd = 22.dp)
+                ) {
+                    Column(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = 16.dp)
+                            .padding(bottom = 32.dp)
+                            .navigationBarsPadding(),
+                        verticalArrangement = Arrangement.spacedBy(10.dp)
+                    ) {
+                        // Header: Symbol, Title, Price
                         Row(
                             modifier = Modifier.fillMaxWidth(),
                             horizontalArrangement = Arrangement.SpaceBetween,
@@ -626,199 +639,195 @@ fun CryptoAnalystMasterApp() {
                                 )
                             }
                         }
-                    },
-                    text = {
-                        Column(
-                            modifier = Modifier.fillMaxWidth(),
-                            verticalArrangement = Arrangement.spacedBy(10.dp)
-                        ) {
-                            // 1. 5-Minute Binance Candlestick Chart (with Yellow EMA9 & Cyan Bollinger Overlay)
-                            Surface(
-                                color = ObsidianBg,
-                                shape = RoundedCornerShape(10.dp),
-                                border = BorderStroke(1.dp, ObsidianBorder),
-                                modifier = Modifier.fillMaxWidth()
-                            ) {
-                                Column(modifier = Modifier.padding(8.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                                    Row(
-                                        modifier = Modifier.fillMaxWidth(),
-                                        horizontalArrangement = Arrangement.SpaceBetween,
-                                        verticalAlignment = Alignment.CenterVertically
-                                    ) {
-                                        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                                            Text(
-                                                text = "📊 5m Mumlar",
-                                                color = IceCyanBright,
-                                                fontSize = 10.5.sp,
-                                                fontWeight = FontWeight.Bold
-                                            )
-                                            Text("•", color = TextTertiary, fontSize = 10.sp)
-                                            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(3.dp)) {
-                                                Box(modifier = Modifier.size(6.dp).clip(CircleShape).background(GoldWarm))
-                                                Text("EMA9", color = GoldWarm, fontSize = 9.sp, fontWeight = FontWeight.Bold)
-                                            }
-                                            Text("•", color = TextTertiary, fontSize = 10.sp)
-                                            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(3.dp)) {
-                                                Box(modifier = Modifier.size(6.dp).clip(CircleShape).background(IceCyan))
-                                                Text("Bollinger", color = IceCyan, fontSize = 9.sp, fontWeight = FontWeight.Bold)
-                                            }
-                                        }
-                                        val minC = asset.recentCandles.minOfOrNull { it.low } ?: currentPrice
-                                        val maxC = asset.recentCandles.maxOfOrNull { it.high } ?: currentPrice
-                                        Text(
-                                            text = "$${String.format(Locale.US, if (minC < 1.0) "%.4f" else "%.2f", minC)} - $${String.format(Locale.US, if (maxC < 1.0) "%.4f" else "%.2f", maxC)}",
-                                            color = TextTertiary,
-                                            fontSize = 8.5.sp,
-                                            fontFamily = FontFamily.Monospace
-                                        )
-                                    }
 
-                                    CandlestickChart(
-                                        candles = asset.recentCandles,
-                                        modifier = Modifier
-                                            .fillMaxWidth()
-                                            .height(125.dp),
-                                        isDetailed = true
+                        // 1. 5-Minute Binance Candlestick Chart (with Yellow EMA9 & Cyan Bollinger Overlay)
+                        Surface(
+                            color = ObsidianBg,
+                            shape = RoundedCornerShape(10.dp),
+                            border = BorderStroke(1.dp, ObsidianBorder),
+                            modifier = Modifier.fillMaxWidth()
+                        ) {
+                            Column(modifier = Modifier.padding(8.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                                Row(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    horizontalArrangement = Arrangement.SpaceBetween,
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                                        Text(
+                                            text = "📊 5m Mumlar",
+                                            color = IceCyanBright,
+                                            fontSize = 10.5.sp,
+                                            fontWeight = FontWeight.Bold
+                                        )
+                                        Text("•", color = TextTertiary, fontSize = 10.sp)
+                                        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(3.dp)) {
+                                            Box(modifier = Modifier.size(6.dp).clip(CircleShape).background(GoldWarm))
+                                            Text("EMA9", color = GoldWarm, fontSize = 9.sp, fontWeight = FontWeight.Bold)
+                                        }
+                                        Text("•", color = TextTertiary, fontSize = 10.sp)
+                                        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(3.dp)) {
+                                            Box(modifier = Modifier.size(6.dp).clip(CircleShape).background(IceCyan))
+                                            Text("Bollinger", color = IceCyan, fontSize = 9.sp, fontWeight = FontWeight.Bold)
+                                        }
+                                    }
+                                    val minC = asset.recentCandles.minOfOrNull { it.low } ?: currentPrice
+                                    val maxC = asset.recentCandles.maxOfOrNull { it.high } ?: currentPrice
+                                    Text(
+                                        text = "$${String.format(Locale.US, if (minC < 1.0) "%.4f" else "%.2f", minC)} - $${String.format(Locale.US, if (maxC < 1.0) "%.4f" else "%.2f", maxC)}",
+                                        color = TextTertiary,
+                                        fontSize = 8.5.sp,
+                                        fontFamily = FontFamily.Monospace
                                     )
                                 }
+
+                                CandlestickChart(
+                                    candles = asset.recentCandles,
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .height(135.dp),
+                                    isDetailed = true,
+                                    vwapPrice = tech?.vwap ?: asset.vwap,
+                                    enableGestures = true
+                                )
                             }
+                        }
 
-                            // 2. Order Book Buyer / Seller Battlefield Bar
-                            Surface(
-                                color = ObsidianCardElevated,
-                                shape = RoundedCornerShape(8.dp),
-                                border = BorderStroke(0.8.dp, ObsidianBorder),
-                                modifier = Modifier.fillMaxWidth()
-                            ) {
-                                Column(modifier = Modifier.padding(8.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                                    Row(
-                                        modifier = Modifier.fillMaxWidth(),
-                                        horizontalArrangement = Arrangement.SpaceBetween
-                                    ) {
-                                        Text(
-                                            text = "🟢 Alıcı Duvarı: %${String.format(Locale.US, "%.0f", buyerRatio)}",
-                                            color = EmeraldProfitBright,
-                                            fontSize = 9.5.sp,
-                                            fontWeight = FontWeight.Bold,
-                                            fontFamily = FontFamily.Monospace
-                                        )
-                                        Text(
-                                            text = "🔴 Satıcı Baskısı: %${String.format(Locale.US, "%.0f", sellerRatio)}",
-                                            color = CoralRedBright,
-                                            fontSize = 9.5.sp,
-                                            fontWeight = FontWeight.Bold,
-                                            fontFamily = FontFamily.Monospace
-                                        )
-                                    }
-
-                                    // Segmented Battlefield Bar
-                                    Row(
-                                        modifier = Modifier
-                                            .fillMaxWidth()
-                                            .height(8.dp)
-                                            .clip(RoundedCornerShape(4.dp))
-                                            .background(ObsidianBg)
-                                    ) {
-                                        Box(
-                                            modifier = Modifier
-                                                .fillMaxHeight()
-                                                .weight((buyerRatio / 100.0).toFloat().coerceIn(0.05f, 0.95f))
-                                                .background(EmeraldProfit)
-                                        )
-                                        Box(
-                                            modifier = Modifier
-                                                .fillMaxHeight()
-                                                .weight((sellerRatio / 100.0).toFloat().coerceIn(0.05f, 0.95f))
-                                                .background(CoralRed)
-                                        )
-                                    }
-                                }
-                            }
-
-                            // 3. Sniper Metrics: Giriş / Satış / Süre
-                            Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                                Surface(
-                                    modifier = Modifier.weight(1f),
-                                    color = ObsidianCardElevated,
-                                    shape = RoundedCornerShape(8.dp),
-                                    border = BorderStroke(0.8.dp, EmeraldProfit.copy(alpha = 0.5f))
+                        // 2. Order Book Buyer / Seller Battlefield Bar
+                        Surface(
+                            color = ObsidianCardElevated,
+                            shape = RoundedCornerShape(8.dp),
+                            border = BorderStroke(0.8.dp, ObsidianBorder),
+                            modifier = Modifier.fillMaxWidth()
+                        ) {
+                            Column(modifier = Modifier.padding(8.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                                Row(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    horizontalArrangement = Arrangement.SpaceBetween
                                 ) {
-                                    Column(modifier = Modifier.padding(7.dp), verticalArrangement = Arrangement.spacedBy(2.dp)) {
-                                        Text("🎯 Pusu Giriş", color = EmeraldProfitBright, fontSize = 8.5.sp, fontWeight = FontWeight.Bold)
-                                        Text(
-                                            text = "$${String.format(Locale.US, if (recommendedPlan.price < 1.0) "%.4f" else "%.2f", recommendedPlan.price)}",
-                                            color = Color.White,
-                                            fontSize = 11.5.sp,
-                                            fontWeight = FontWeight.Bold,
-                                            fontFamily = FontFamily.Monospace
-                                        )
-                                        Text("-%${String.format(Locale.US, "%.1f", recommendedPlan.dropPercent)} Desteği", color = EmeraldProfit, fontSize = 8.sp)
-                                    }
-                                }
-
-                                val targetScalp = recommendedPlan.price * (1.0 + 0.014)
-                                Surface(
-                                    modifier = Modifier.weight(1f),
-                                    color = ObsidianCardElevated,
-                                    shape = RoundedCornerShape(8.dp),
-                                    border = BorderStroke(0.8.dp, GoldWarm.copy(alpha = 0.5f))
-                                ) {
-                                    Column(modifier = Modifier.padding(7.dp), verticalArrangement = Arrangement.spacedBy(2.dp)) {
-                                        Text("🔴 Hedef Satış", color = GoldWarm, fontSize = 8.5.sp, fontWeight = FontWeight.Bold)
-                                        Text(
-                                            text = "$${String.format(Locale.US, if (targetScalp < 1.0) "%.4f" else "%.2f", targetScalp)}",
-                                            color = Color.White,
-                                            fontSize = 11.5.sp,
-                                            fontWeight = FontWeight.Bold,
-                                            fontFamily = FontFamily.Monospace
-                                        )
-                                        Text("+%1.0 Net Kâr", color = EmeraldProfitBright, fontSize = 8.sp, fontWeight = FontWeight.Bold)
-                                    }
-                                }
-
-                                Surface(
-                                    modifier = Modifier.weight(1f),
-                                    color = ObsidianCardElevated,
-                                    shape = RoundedCornerShape(8.dp),
-                                    border = BorderStroke(0.8.dp, IceCyanBright.copy(alpha = 0.4f))
-                                ) {
-                                    Column(modifier = Modifier.padding(7.dp), verticalArrangement = Arrangement.spacedBy(2.dp)) {
-                                        Text("⏱️ Pusu Süresi", color = IceCyanBright, fontSize = 8.5.sp, fontWeight = FontWeight.Bold)
-                                        Text("${recommendedTimeout} Dk", color = Color.White, fontSize = 11.5.sp, fontWeight = FontWeight.Bold, fontFamily = FontFamily.Monospace)
-                                        Text("3 Mum (5m)", color = TextSecondary, fontSize = 8.sp)
-                                    }
-                                }
-                            }
-
-                            // 4. Educational AI Mentor Callout Box (Neden Buradayız?)
-                            Surface(
-                                color = ObsidianBg,
-                                shape = RoundedCornerShape(10.dp),
-                                border = BorderStroke(0.8.dp, GoldWarm.copy(alpha = 0.6f)),
-                                modifier = Modifier.fillMaxWidth()
-                            ) {
-                                Column(modifier = Modifier.padding(9.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                                    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                                        Text("🧠", fontSize = 13.sp)
-                                        Text(
-                                            text = "EĞİTİCİ MENTÖR (Neden Buradayız?)",
-                                            color = GoldWarm,
-                                            fontSize = 10.sp,
-                                            fontWeight = FontWeight.ExtraBold,
-                                            fontFamily = FontFamily.Monospace
-                                        )
-                                    }
                                     Text(
-                                        text = strategyAnalysis.aiRecommendationReason,
-                                        color = TextPrimary.copy(alpha = 0.95f),
-                                        fontSize = 10.sp,
-                                        lineHeight = 14.sp
+                                        text = "🟢 Alıcı Duvarı: %${String.format(Locale.US, "%.0f", buyerRatio)}",
+                                        color = EmeraldProfitBright,
+                                        fontSize = 9.5.sp,
+                                        fontWeight = FontWeight.Bold,
+                                        fontFamily = FontFamily.Monospace
+                                    )
+                                    Text(
+                                        text = "🔴 Satıcı Baskısı: %${String.format(Locale.US, "%.0f", sellerRatio)}",
+                                        color = CoralRedBright,
+                                        fontSize = 9.5.sp,
+                                        fontWeight = FontWeight.Bold,
+                                        fontFamily = FontFamily.Monospace
+                                    )
+                                }
+
+                                // Segmented Battlefield Bar
+                                Row(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .height(8.dp)
+                                        .clip(RoundedCornerShape(4.dp))
+                                        .background(ObsidianBg)
+                                ) {
+                                    Box(
+                                        modifier = Modifier
+                                            .fillMaxHeight()
+                                            .weight((buyerRatio / 100.0).toFloat().coerceIn(0.05f, 0.95f))
+                                            .background(EmeraldProfit)
+                                    )
+                                    Box(
+                                        modifier = Modifier
+                                            .fillMaxHeight()
+                                            .weight((sellerRatio / 100.0).toFloat().coerceIn(0.05f, 0.95f))
+                                            .background(CoralRed)
                                     )
                                 }
                             }
                         }
-                    },
-                    confirmButton = {
+
+                        // 3. Sniper Metrics: Giriş / Satış / Süre
+                        Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                            Surface(
+                                modifier = Modifier.weight(1f),
+                                color = ObsidianCardElevated,
+                                shape = RoundedCornerShape(8.dp),
+                                border = BorderStroke(0.8.dp, EmeraldProfit.copy(alpha = 0.5f))
+                            ) {
+                                Column(modifier = Modifier.padding(7.dp), verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                                    Text("🎯 Pusu Giriş", color = EmeraldProfitBright, fontSize = 8.5.sp, fontWeight = FontWeight.Bold)
+                                    Text(
+                                        text = "$${String.format(Locale.US, if (recommendedPlan.price < 1.0) "%.4f" else "%.2f", recommendedPlan.price)}",
+                                        color = Color.White,
+                                        fontSize = 11.5.sp,
+                                        fontWeight = FontWeight.Bold,
+                                        fontFamily = FontFamily.Monospace
+                                    )
+                                    Text("-%${String.format(Locale.US, "%.1f", recommendedPlan.dropPercent)} Desteği", color = EmeraldProfit, fontSize = 8.sp)
+                                }
+                            }
+
+                            val targetScalp = recommendedPlan.price * (1.0 + 0.014)
+                            Surface(
+                                modifier = Modifier.weight(1f),
+                                color = ObsidianCardElevated,
+                                shape = RoundedCornerShape(8.dp),
+                                border = BorderStroke(0.8.dp, GoldWarm.copy(alpha = 0.5f))
+                            ) {
+                                Column(modifier = Modifier.padding(7.dp), verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                                    Text("🔴 Hedef Satış", color = GoldWarm, fontSize = 8.5.sp, fontWeight = FontWeight.Bold)
+                                    Text(
+                                        text = "$${String.format(Locale.US, if (targetScalp < 1.0) "%.4f" else "%.2f", targetScalp)}",
+                                        color = Color.White,
+                                        fontSize = 11.5.sp,
+                                        fontWeight = FontWeight.Bold,
+                                        fontFamily = FontFamily.Monospace
+                                    )
+                                    Text("+%1.0 Net Kâr", color = EmeraldProfitBright, fontSize = 8.sp, fontWeight = FontWeight.Bold)
+                                }
+                            }
+
+                            Surface(
+                                modifier = Modifier.weight(1f),
+                                color = ObsidianCardElevated,
+                                shape = RoundedCornerShape(8.dp),
+                                border = BorderStroke(0.8.dp, IceCyanBright.copy(alpha = 0.4f))
+                            ) {
+                                Column(modifier = Modifier.padding(7.dp), verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                                    Text("⏱️ Pusu Süresi", color = IceCyanBright, fontSize = 8.5.sp, fontWeight = FontWeight.Bold)
+                                    Text("${recommendedTimeout} Dk", color = Color.White, fontSize = 11.5.sp, fontWeight = FontWeight.Bold, fontFamily = FontFamily.Monospace)
+                                    Text("3 Mum (5m)", color = TextSecondary, fontSize = 8.sp)
+                                }
+                            }
+                        }
+
+                        // 4. Educational AI Mentor Callout Box (Neden Buradayız?)
+                        Surface(
+                            color = ObsidianBg,
+                            shape = RoundedCornerShape(10.dp),
+                            border = BorderStroke(0.8.dp, GoldWarm.copy(alpha = 0.6f)),
+                            modifier = Modifier.fillMaxWidth()
+                        ) {
+                            Column(modifier = Modifier.padding(9.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                                    Text("🧠", fontSize = 13.sp)
+                                    Text(
+                                        text = "EĞİTİCİ MENTÖR (Neden Buradayız?)",
+                                        color = GoldWarm,
+                                        fontSize = 10.sp,
+                                        fontWeight = FontWeight.ExtraBold,
+                                        fontFamily = FontFamily.Monospace
+                                    )
+                                }
+                                Text(
+                                    text = strategyAnalysis.aiRecommendationReason,
+                                    color = TextPrimary.copy(alpha = 0.95f),
+                                    fontSize = 10.sp,
+                                    lineHeight = 14.sp
+                                )
+                            }
+                        }
+
+                        // Action Buttons: Pusuyu Başlat and Kapat
                         Button(
                             onClick = {
                                 val target = asset
@@ -827,17 +836,14 @@ fun CryptoAnalystMasterApp() {
                             },
                             colors = ButtonDefaults.buttonColors(containerColor = EmeraldProfit, contentColor = Color.Black),
                             shape = RoundedCornerShape(10.dp),
-                            modifier = Modifier.fillMaxWidth().height(42.dp)
+                            modifier = Modifier.fillMaxWidth().height(44.dp)
                         ) {
+                            Icon(Icons.Default.Shield, contentDescription = null, modifier = Modifier.size(16.dp))
+                            Spacer(modifier = Modifier.width(6.dp))
                             Text("🎯 Pusuyu Başlat (Hedef: +%1.0 Kâr)", fontWeight = FontWeight.ExtraBold, fontSize = 12.5.sp)
                         }
-                    },
-                    dismissButton = {
-                        TextButton(onClick = { selectedAssetDetails = null }) {
-                            Text("Kapat", color = TextSecondary, fontSize = 11.sp)
-                        }
                     }
-                )
+                }
             }
 
             // 2. DIALOG: 3-TIER BUDGET ALLOCATION MODAL DIALOG
@@ -3871,20 +3877,37 @@ fun LiveAssistantScreen(
                         }
                     }
 
-                    // ACTION BUTTON: Track Trade with Budget Approval
-                    Button(
-                        onClick = {
-                            onOpenBudgetProposal(asset)
-                        },
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .height(40.dp),
-                        shape = RoundedCornerShape(8.dp),
-                        colors = ButtonDefaults.buttonColors(containerColor = IceCyanBright, contentColor = Color.Black)
+                    // ACTION BUTTONS: Strateji Odası & Track Trade with Budget Approval
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
                     ) {
-                        Icon(imageVector = Icons.Default.Shield, contentDescription = null, modifier = Modifier.size(16.dp))
-                        Spacer(modifier = Modifier.width(6.dp))
-                        Text("🎯 Midas'ta Pusu Limit Emri Aç & Bütçe Ayır", fontSize = 11.5.sp, fontWeight = FontWeight.ExtraBold)
+                        OutlinedButton(
+                            onClick = { onOpenAssetDetails(asset) },
+                            modifier = Modifier
+                                .weight(1f)
+                                .height(40.dp),
+                            shape = RoundedCornerShape(8.dp),
+                            border = BorderStroke(1.dp, IceCyanBright.copy(alpha = 0.6f)),
+                            colors = ButtonDefaults.outlinedButtonColors(contentColor = IceCyanBright)
+                        ) {
+                            Text("⚔️ Strateji Odası", fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                        }
+
+                        Button(
+                            onClick = {
+                                onOpenBudgetProposal(asset)
+                            },
+                            modifier = Modifier
+                                .weight(1.4f)
+                                .height(40.dp),
+                            shape = RoundedCornerShape(8.dp),
+                            colors = ButtonDefaults.buttonColors(containerColor = IceCyanBright, contentColor = Color.Black)
+                        ) {
+                            Icon(imageVector = Icons.Default.Shield, contentDescription = null, modifier = Modifier.size(15.dp))
+                            Spacer(modifier = Modifier.width(4.dp))
+                            Text("🎯 Pusu Aç & Bütçe", fontSize = 11.sp, fontWeight = FontWeight.ExtraBold)
+                        }
                     }
                 }
             }
@@ -4758,7 +4781,8 @@ fun CandlestickChart(
     candles: List<CandleStick>,
     modifier: Modifier = Modifier,
     isDetailed: Boolean = false,
-    vwapPrice: Double? = null
+    vwapPrice: Double? = null,
+    enableGestures: Boolean = false
 ) {
     if (candles.isEmpty()) {
         Box(
@@ -4774,17 +4798,21 @@ fun CandlestickChart(
     var scale by remember { mutableFloatStateOf(1f) }
     var offsetX by remember { mutableFloatStateOf(0f) }
 
-    Box(modifier = modifier) {
-        Canvas(
-            modifier = Modifier
-                .fillMaxSize()
-                .pointerInput(Unit) {
-                    detectTransformGestures { _, pan, zoom, _ ->
-                        scale = (scale * zoom).coerceIn(0.6f, 4.5f)
-                        offsetX += pan.x
-                    }
+    val canvasModifier = if (enableGestures) {
+        Modifier
+            .fillMaxSize()
+            .pointerInput(Unit) {
+                detectTransformGestures { _, pan, zoom, _ ->
+                    scale = (scale * zoom).coerceIn(0.6f, 4.5f)
+                    offsetX += pan.x
                 }
-        ) {
+            }
+    } else {
+        Modifier.fillMaxSize()
+    }
+
+    Box(modifier = modifier) {
+        Canvas(modifier = canvasModifier) {
             val width = size.width
             val height = size.height
             if (width <= 0f || height <= 0f) return@Canvas

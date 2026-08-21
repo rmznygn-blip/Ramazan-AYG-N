@@ -220,17 +220,20 @@ object AiAdvisorEngine {
         var bestOpportunity: Pair<CryptoAsset, TechnicalAnalysis5m>? = null
         var highestScore = -100.0
 
+        var closestCandidate: Pair<CryptoAsset, TechnicalAnalysis5m>? = null
+        var closestCandidateScore = -100.0
+
         for (asset in assets) {
             val tech = techMap[asset.symbol] ?: continue
             val candles = asset.recentCandles
             val latestCandle = candles.lastOrNull()
             val isRedCandle = latestCandle != null && latestCandle.close < latestCandle.open
-            val isDeepDump = isRedCandle && (tech.zScore < -1.8 || tech.isPriceBelowBollingerLower)
+            val isSevereDump = isRedCandle && tech.zScore < -2.6 && tech.isPriceBelowBollingerLower
 
-            // 1. Düşen Bıçak Filtresi: Fiyat Bollinger altındayken hala kırmızıysa girilmez, yeşil teyit beklenir.
-            val isFallingKnife = isDeepDump && (latestCandle.close - latestCandle.low) < (latestCandle.open - latestCandle.close) * 0.5
+            // 1. Düşen Bıçak Filtresi (Toleranslı): Sadece sıfır fitilli aşırı kırmızı mumlar bıçak kabul edilir
+            val isFallingKnife = isSevereDump && (latestCandle.close - latestCandle.low) < (latestCandle.open - latestCandle.close) * 0.20
 
-            // 2. Anti-Spoofing Hacim İvmesi: Alıcı duvarı (>= %60) yanında hacim ivmesi pozitif olmalı (gerçek nakit girişi)
+            // 2. Anti-Spoofing Hacim İvmesi: Alıcı duvarı (>= %55) yanında hacim ivmesi kontrol edilir
             val bidRatio = tech.orderBookDepth.bidRatio
             val volMomentum = if (asset.volumeMomentum > 0) asset.volumeMomentum else tech.volumeMomentum
 
@@ -239,15 +242,22 @@ object AiAdvisorEngine {
             val vwapVal = if (asset.vwap > 0) asset.vwap else tech.vwap
             val vwapDistPct = if (currentP > 0 && vwapVal > 0) ((vwapVal - currentP) / currentP) * 100.0 else 0.0
 
+            // Kurumsal Skorlama Formülü (Confluence + VWAP Mıknatısı + Hacim İvmesi + Alıcı Duvarı)
+            var quantScore = tech.confluenceScore.toDouble()
+            if (bidRatio >= 0.55) quantScore += 10.0 // %55+ Alıcı duvarı bonusu
+            if (volMomentum >= 1.05) quantScore += 12.0 // Hacim ivmesi
+            if (vwapDistPct in 0.2..4.0) quantScore += 12.0 // Sağlıklı VWAP sekme potansiyeli
+            if (latestCandle != null && latestCandle.close >= latestCandle.open) quantScore += 10.0 // Yeşil dönüş teyidi
+
+            // En yakın adayı her halükarda takip et
+            if (quantScore > closestCandidateScore) {
+                closestCandidateScore = quantScore
+                closestCandidate = Pair(asset, tech)
+            }
+
             if (isFallingKnife || tech.isVolumeShock || tech.orderBookDepth.isOrderBookFear || tech.isOverboughtRisk) {
                 continue
             }
-
-            // Kurumsal Skorlama Formülü (Confluence + VWAP Mıknatısı + Hacim İvmesi)
-            var quantScore = tech.confluenceScore.toDouble()
-            if (volMomentum >= 1.10) quantScore += 15.0 // Anti-spoofing hacim patlaması
-            if (vwapDistPct in 0.3..3.5) quantScore += 15.0 // Sağlıklı VWAP mıknatıs sekmesi
-            if (latestCandle != null && latestCandle.close >= latestCandle.open) quantScore += 10.0 // Yeşil dönüş mumu teyidi
 
             if (quantScore > highestScore) {
                 highestScore = quantScore
@@ -255,7 +265,8 @@ object AiAdvisorEngine {
             }
         }
 
-        if (bestOpportunity != null && highestScore >= 60.0) {
+        // Öncelik 1: Tam Kurumsal Sinyal (Tüm kurumsal filtreleri geçmiş ve skoru yüksek)
+        if (bestOpportunity != null && highestScore >= 55.0) {
             val (asset, tech) = bestOpportunity
             val currentPrice = if (asset.rawPrice > 0) asset.rawPrice else tech.currentPrice
             val strategyAnalysis = evaluateSmartEntryStrategies(asset, tech, currentPrice, capitalProfile)
@@ -281,6 +292,35 @@ object AiAdvisorEngine {
                 recommendedExitPrice = targetExit,
                 netProfitUsdtExpected = expectedNetUsdt,
                 reasoning = "Kusursuz Sniper: ${strategyAnalysis.aiRecommendationReason} | Tahta: %$orderBookRatio Alıcı | VWAP: $$vwapText | Hacim İvmesi: ${String.format(Locale.US, "%.2f", asset.volumeMomentum)}x"
+            )
+        }
+
+        // Öncelik 2: En Yakın Pusu Adayı (Piyasa şartlarının çoğunu sağlayan lider aday)
+        if (closestCandidate != null) {
+            val (asset, tech) = closestCandidate
+            val currentPrice = if (asset.rawPrice > 0) asset.rawPrice else tech.currentPrice
+            val strategyAnalysis = evaluateSmartEntryStrategies(asset, tech, currentPrice, capitalProfile)
+            val recommendedPlan = strategyAnalysis.options.firstOrNull { it.isRecommended } ?: strategyAnalysis.options[0]
+            val entryLimit = recommendedPlan.price
+            val targetExit = entryLimit * (1.0 + (1.0 + 0.40) / 100.0)
+            val tier1InvestBudget = (cash * (1.0 / 7.0)).coerceIn(15.0, (cash * 0.35).coerceAtLeast(15.0))
+            val expectedNetUsdt = tier1InvestBudget * 0.010
+
+            val orderBookRatio = String.format(Locale.US, "%.0f", tech.orderBookDepth.bidRatio * 100)
+            val vwapText = String.format(Locale.US, if (asset.vwap < 1.0) "%.4f" else "%.2f", if (asset.vwap > 0) asset.vwap else tech.vwap)
+
+            return ActionGuidance(
+                title = "🎯 EN YAKIN PUSU ADAYI: ${asset.symbol}/USDT",
+                statusBadge = "🎯 EN YAKIN PUSU ADAYI (SKOR: %${String.format(Locale.US, "%.0f", closestCandidateScore.coerceIn(40.0, 99.0))})",
+                statusColorHex = 0xFFFFB300,
+                step1 = "1. PUSU ADAYI: ${asset.symbol} şartların çoğunu sağlıyor. $${String.format(Locale.US, if (entryLimit < 1.0) "%.4f" else "%.2f", entryLimit)} USDT pusu seviyesi test edilebilir.",
+                step2 = "2. 🛡️ KADEMELİ PLAN: ~$${String.format(Locale.US, "%.0f", tier1InvestBudget)} USDT bütçe ile 1. Kademe ($${String.format(Locale.US, if (entryLimit < 1.0) "%.4f" else "%.2f", entryLimit)}), sarkarsa 2. Kademe ($${String.format(Locale.US, if (tech.dcaTier2Price < 1.0) "%.4f" else "%.2f", tech.dcaTier2Price)}) hedeflenir.",
+                step3 = "3. 🎯 HEDEF: $${String.format(Locale.US, if (targetExit < 1.0) "%.4f" else "%.2f", targetExit)} USDT limit satış ile net +%1.0 kâr ($${String.format(Locale.US, "%.2f", expectedNetUsdt)} USDT).",
+                targetSymbol = asset.symbol,
+                recommendedEntryPrice = entryLimit,
+                recommendedExitPrice = targetExit,
+                netProfitUsdtExpected = expectedNetUsdt,
+                reasoning = "En Güçlü Aday: ${strategyAnalysis.aiRecommendationReason} | Tahta: %$orderBookRatio Alıcı | VWAP: $$vwapText | İvme: ${String.format(Locale.US, "%.2f", asset.volumeMomentum)}x"
             )
         }
 
@@ -748,8 +788,8 @@ object AiAdvisorEngine {
 
         // Sniper Price Algorithm:
         val sniperPrice = when {
-            // Eğer yeşil dönüş mumu oluşmuş ve alıcı baskısı güçlüyse EMA9 veya güncel taban desteği pusu noktasıdır
-            (isLastCandleGreen || isLowerWickBounce) && bidRatio >= 0.65 && ema9 in (safeCurrent * 0.988)..(safeCurrent * 0.999) -> {
+            // Eğer yeşil dönüş mumu oluşmuş ve alıcı baskısı güçlüyse (%55+ alıcı) EMA9 veya güncel taban desteği pusu noktasıdır
+            (isLastCandleGreen || isLowerWickBounce) && bidRatio >= 0.55 && ema9 in (safeCurrent * 0.988)..(safeCurrent * 0.999) -> {
                 ema9
             }
             // VWAP altında aşırı satım varsa ve hacim ivmesi destekliyorsa dinamik taban
