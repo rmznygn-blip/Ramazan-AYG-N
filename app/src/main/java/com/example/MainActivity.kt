@@ -584,9 +584,9 @@ fun CryptoAnalystMasterApp() {
                 }
 
                 val snapshotEntryPrice = snapshotRecommendedPlan.price
-                val snapshotTargetExitPrice = snapshotEntryPrice * (1.0 + (1.0 + 0.40) / 100.0) // +%1.0 Net Kâr (+%0.40 Midas komisyonu dahil)
-                val snapshotTier2Price = tech?.dcaTier2Price ?: (snapshotEntryPrice * 0.975)
-                val snapshotTier3Price = tech?.dcaTier3Price ?: (snapshotEntryPrice * 0.950)
+                val snapshotTargetExitPrice = snapshotEntryPrice * 1.01 // Net %1.0 Kâr (1. Kademe * 1.01)
+                val snapshotTier2Price = snapshotEntryPrice * 0.99 // 2. Kademe = 1. Kademe * 0.99
+                val snapshotTier3Price = snapshotEntryPrice * 0.98 // 3. Kademe = 1. Kademe * 0.98
 
                 val buyerRatio = ((tech?.orderBookDepth?.bidRatio ?: 0.55) * 100.0).coerceIn(10.0, 90.0)
                 val sellerRatio = (100.0 - buyerRatio).coerceIn(10.0, 90.0)
@@ -2799,6 +2799,10 @@ fun LiveAssistantScreen(
         if (selectedFilter == "ALL") assets else assets.filter { it.symbol.equals(selectedFilter, ignoreCase = true) }
     }
 
+    val masterTarget = remember(assets, oracleMap, techMap, capitalProfile) {
+        AiAdvisorEngine.findMasterAmbushTarget(assets, oracleMap, techMap, capitalProfile)
+    }
+
     LazyColumn(
         modifier = Modifier
             .fillMaxSize()
@@ -3485,6 +3489,239 @@ fun LiveAssistantScreen(
                                         modifier = Modifier.padding(horizontal = 4.dp, vertical = 2.dp)
                                     )
                                 }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        // 🔥 MASTER AMBUSH TARGET CARD (YAPAY ZEKA NİHAİ PUSU HEDEFİ)
+        masterTarget?.let { target ->
+            item {
+                Surface(
+                    modifier = Modifier.fillMaxWidth(),
+                    color = ObsidianSurface,
+                    shape = RoundedCornerShape(16.dp),
+                    border = BorderStroke(1.5.dp, GoldWarm)
+                ) {
+                    Column(
+                        modifier = Modifier.padding(14.dp),
+                        verticalArrangement = Arrangement.spacedBy(10.dp)
+                    ) {
+                        // Title & Badge Header
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(6.dp)
+                            ) {
+                                Box(
+                                    modifier = Modifier
+                                        .size(10.dp)
+                                        .clip(CircleShape)
+                                        .background(GoldWarm)
+                                )
+                                Text(
+                                    text = "🔥 YAPAY ZEKA NİHAİ PUSU HEDEFİ",
+                                    color = GoldWarm,
+                                    fontSize = 11.5.sp,
+                                    fontWeight = FontWeight.ExtraBold,
+                                    fontFamily = FontFamily.Monospace
+                                )
+                            }
+
+                            Surface(
+                                color = GoldContainer,
+                                shape = RoundedCornerShape(6.dp),
+                                border = BorderStroke(1.dp, GoldWarm)
+                            ) {
+                                Text(
+                                    text = "⚡ Skor: ${target.opportunityScore}/100",
+                                    color = GoldWarm,
+                                    fontSize = 10.sp,
+                                    fontWeight = FontWeight.ExtraBold,
+                                    modifier = Modifier.padding(horizontal = 7.dp, vertical = 2.5.dp),
+                                    fontFamily = FontFamily.Monospace
+                                )
+                            }
+                        }
+
+                        // Target Coin & Current Price Banner
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(8.dp)
+                            ) {
+                                Surface(
+                                    color = ObsidianCardElevated,
+                                    shape = RoundedCornerShape(8.dp),
+                                    border = BorderStroke(1.dp, EmeraldProfitBright)
+                                ) {
+                                    Text(
+                                        text = "${target.asset.symbol}/USDT",
+                                        color = TextPrimary,
+                                        fontSize = 15.sp,
+                                        fontWeight = FontWeight.ExtraBold,
+                                        fontFamily = FontFamily.Monospace,
+                                        modifier = Modifier.padding(horizontal = 9.dp, vertical = 4.dp)
+                                    )
+                                }
+                                Column {
+                                    Text(
+                                        text = "Anlık: $${String.format(Locale.US, if (target.currentPrice < 1.0) "%.4f" else "%.2f", target.currentPrice)}",
+                                        color = TextSecondary,
+                                        fontSize = 11.sp,
+                                        fontFamily = FontFamily.Monospace,
+                                        fontWeight = FontWeight.Bold
+                                    )
+                                    Text(
+                                        text = "Pusu Geri Çekilme: -%${String.format(Locale.US, "%.2f", target.dropPercent)}",
+                                        color = EmeraldProfitBright,
+                                        fontSize = 9.5.sp,
+                                        fontWeight = FontWeight.SemiBold
+                                    )
+                                }
+                            }
+
+                            Surface(
+                                color = ObsidianCardElevated,
+                                shape = RoundedCornerShape(6.dp),
+                                border = BorderStroke(0.6.dp, IceCyanBright.copy(alpha = 0.5f))
+                            ) {
+                                Text(
+                                    text = "⏱️ ${target.timeoutMinutes} Dk Pusu",
+                                    color = IceCyanBright,
+                                    fontSize = 9.5.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    modifier = Modifier.padding(horizontal = 6.dp, vertical = 3.dp)
+                                )
+                            }
+                        }
+
+                        // Primary Numbers Strip: 1. Kademe Giriş & Hedef Limit Satış
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.spacedBy(8.dp)
+                        ) {
+                            Surface(
+                                modifier = Modifier.weight(1f),
+                                color = ObsidianCardElevated,
+                                shape = RoundedCornerShape(10.dp),
+                                border = BorderStroke(1.dp, EmeraldProfit.copy(alpha = 0.8f))
+                            ) {
+                                Column(modifier = Modifier.padding(9.dp), verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                                    Text("🎯 1. KADEME PUSU AL", color = EmeraldProfitBright, fontSize = 9.sp, fontWeight = FontWeight.ExtraBold, fontFamily = FontFamily.Monospace)
+                                    Text(
+                                        text = "$${String.format(Locale.US, if (target.entryPrice < 1.0) "%.4f" else "%.2f", target.entryPrice)}",
+                                        color = Color.White,
+                                        fontSize = 14.sp,
+                                        fontWeight = FontWeight.ExtraBold,
+                                        fontFamily = FontFamily.Monospace
+                                    )
+                                    Text("Giriş Emri", color = EmeraldProfit, fontSize = 8.5.sp)
+                                }
+                            }
+
+                            Surface(
+                                modifier = Modifier.weight(1f),
+                                color = ObsidianCardElevated,
+                                shape = RoundedCornerShape(10.dp),
+                                border = BorderStroke(1.dp, GoldWarm.copy(alpha = 0.8f))
+                            ) {
+                                Column(modifier = Modifier.padding(9.dp), verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                                    Text("🔴 HEDEF LİMİT SAT", color = GoldWarm, fontSize = 9.sp, fontWeight = FontWeight.ExtraBold, fontFamily = FontFamily.Monospace)
+                                    Text(
+                                        text = "$${String.format(Locale.US, if (target.targetExitPrice < 1.0) "%.4f" else "%.2f", target.targetExitPrice)}",
+                                        color = Color.White,
+                                        fontSize = 14.sp,
+                                        fontWeight = FontWeight.ExtraBold,
+                                        fontFamily = FontFamily.Monospace
+                                    )
+                                    Text("+%1.0 Net Kâr Hedefi", color = EmeraldProfitBright, fontSize = 8.5.sp, fontWeight = FontWeight.Bold)
+                                }
+                            }
+                        }
+
+                        // DCA Savunma Strip
+                        Surface(
+                            color = ObsidianBg,
+                            shape = RoundedCornerShape(8.dp),
+                            border = BorderStroke(0.8.dp, ObsidianBorder),
+                            modifier = Modifier.fillMaxWidth()
+                        ) {
+                            Row(
+                                modifier = Modifier
+                                    .padding(horizontal = 10.dp, vertical = 6.dp)
+                                    .fillMaxWidth(),
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Text("🛡️ DCA:", color = TextSecondary, fontSize = 9.5.sp, fontWeight = FontWeight.Bold)
+                                Text("2. Kademe: $${String.format(Locale.US, if (target.tier2Price < 1.0) "%.4f" else "%.2f", target.tier2Price)} (%1 Altı)", color = IceCyanBright, fontSize = 9.sp, fontFamily = FontFamily.Monospace)
+                                Text("3. Kademe: $${String.format(Locale.US, if (target.tier3Price < 1.0) "%.4f" else "%.2f", target.tier3Price)} (%2 Altı)", color = GoldWarm, fontSize = 9.sp, fontFamily = FontFamily.Monospace)
+                            }
+                        }
+
+                        // AI Mentör Açıklama Metni
+                        Surface(
+                            color = ObsidianBg,
+                            shape = RoundedCornerShape(8.dp),
+                            border = BorderStroke(0.6.dp, GoldWarm.copy(alpha = 0.4f)),
+                            modifier = Modifier.fillMaxWidth()
+                        ) {
+                            Row(
+                                modifier = Modifier.padding(9.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(7.dp)
+                            ) {
+                                Text("🤖", fontSize = 13.sp)
+                                Text(
+                                    text = target.aiReason,
+                                    color = TextPrimary.copy(alpha = 0.95f),
+                                    fontSize = 10.sp,
+                                    lineHeight = 14.sp
+                                )
+                            }
+                        }
+
+                        // Action Buttons: Pusu Aç & Strateji Odası
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.spacedBy(8.dp)
+                        ) {
+                            Button(
+                                onClick = { onOpenBudgetProposal(target.asset) },
+                                modifier = Modifier
+                                    .weight(1.3f)
+                                    .height(42.dp),
+                                shape = RoundedCornerShape(8.dp),
+                                colors = ButtonDefaults.buttonColors(containerColor = GoldWarm, contentColor = Color.Black)
+                            ) {
+                                Icon(Icons.Default.Shield, contentDescription = null, modifier = Modifier.size(16.dp))
+                                Spacer(modifier = Modifier.width(5.dp))
+                                Text("🎯 Midas'ta Pusu Aç & Bütçe Ayır", fontWeight = FontWeight.ExtraBold, fontSize = 11.sp)
+                            }
+
+                            OutlinedButton(
+                                onClick = { onOpenAssetDetails(target.asset) },
+                                modifier = Modifier
+                                    .weight(0.9f)
+                                    .height(42.dp),
+                                shape = RoundedCornerShape(8.dp),
+                                colors = ButtonDefaults.outlinedButtonColors(contentColor = IceCyanBright),
+                                border = BorderStroke(1.dp, IceCyanBright.copy(alpha = 0.6f))
+                            ) {
+                                Icon(Icons.Default.Analytics, contentDescription = null, modifier = Modifier.size(14.dp))
+                                Spacer(modifier = Modifier.width(3.dp))
+                                Text("⚔️ Strateji Odası", fontWeight = FontWeight.Bold, fontSize = 10.5.sp)
                             }
                         }
                     }

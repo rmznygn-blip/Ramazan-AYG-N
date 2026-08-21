@@ -665,27 +665,14 @@ object AiAdvisorEngine {
         val safePool = if (totalPoolUsdt > 0) totalPoolUsdt else 60.0
         val tierAmount = safePool / 3.0
 
-        // Tighter DCA tier distances: 1.0 * ATR and 2.0 * ATR
-        val tier2Price = if (tech != null && tech.atr14 > 0) {
-            (safeEntry - (tech.atr14 * 1.0)).coerceIn(safeEntry * 0.965, safeEntry * 0.992)
-        } else if (tech != null && tech.supportLevel > 0 && tech.supportLevel < safeEntry) {
-            tech.supportLevel
-        } else {
-            safeEntry * 0.985 // -1.5%
-        }
-
-        val tier3Price = if (tech != null && tech.atr14 > 0) {
-            (safeEntry - (tech.atr14 * 2.0)).coerceIn(safeEntry * 0.930, safeEntry * 0.975)
-        } else if (tech != null && tech.dcaTier3Price > 0 && tech.dcaTier3Price < tier2Price) {
-            tech.dcaTier3Price
-        } else {
-            safeEntry * 0.970 // -3.0%
-        }
+        // Kesin Kurallar: 2. Kademe = 1. Kademe * 0.99 (%1 altı), 3. Kademe = 1. Kademe * 0.98 (%2 altı)
+        val tier2Price = safeEntry * 0.99
+        val tier3Price = safeEntry * 0.98
 
         // Tier 1 calculation
         val t1Coins = (tierAmount * 0.998) / safeEntry
         val t1AvgCost = safeEntry
-        val t1TargetExit = t1AvgCost * (1.0 + (targetProfitPct + 0.40) / 100.0)
+        val t1TargetExit = safeEntry * 1.01 // Net %1 Kâr Hedefi (1. Kademe * 1.01)
         val t1ProfitUsdt = tierAmount * (targetProfitPct / 100.0)
         val t1 = DcaPlanTier(
             tierNumber = 1,
@@ -705,13 +692,13 @@ object AiAdvisorEngine {
         val cumInvest2 = tierAmount * 2
         val totalCoins2 = t1Coins + t2Coins
         val t2AvgCost = cumInvest2 / (totalCoins2 / 0.998)
-        val t2TargetExit = t2AvgCost * (1.0 + (targetProfitPct + 0.40) / 100.0)
+        val t2TargetExit = t2AvgCost * 1.01
         val t2ProfitUsdt = cumInvest2 * (targetProfitPct / 100.0)
         val t2 = DcaPlanTier(
             tierNumber = 2,
-            name = "2. Kademe (1.0x ATR Destek)",
+            name = "2. Kademe (%1 Savunma)",
             price = tier2Price,
-            dropPercentFromEntry = ((safeEntry - tier2Price) / safeEntry) * 100.0,
+            dropPercentFromEntry = 1.0,
             allocatedUsdt = tierAmount,
             estimatedCoinAmount = t2Coins,
             cumulativeInvestedUsdt = cumInvest2,
@@ -725,13 +712,13 @@ object AiAdvisorEngine {
         val cumInvest3 = tierAmount * 3
         val totalCoins3 = t1Coins + t2Coins + t3Coins
         val t3AvgCost = cumInvest3 / (totalCoins3 / 0.998)
-        val t3TargetExit = t3AvgCost * (1.0 + (targetProfitPct + 0.40) / 100.0)
+        val t3TargetExit = t3AvgCost * 1.01
         val t3ProfitUsdt = cumInvest3 * (targetProfitPct / 100.0)
         val t3 = DcaPlanTier(
             tierNumber = 3,
-            name = "3. Kademe (2.0x ATR Son Savunma)",
+            name = "3. Kademe (%2 Son Savunma)",
             price = tier3Price,
-            dropPercentFromEntry = ((safeEntry - tier3Price) / safeEntry) * 100.0,
+            dropPercentFromEntry = 2.0,
             allocatedUsdt = tierAmount,
             estimatedCoinAmount = t3Coins,
             cumulativeInvestedUsdt = cumInvest3,
@@ -760,9 +747,9 @@ object AiAdvisorEngine {
         currentPrice: Double,
         capitalProfile: CapitalProfileEntity? = null
     ): CoinEntryStrategyAnalysis {
-        val safeCurrent = if (asset.rawPrice > 0) asset.rawPrice else if (currentPrice > 0) currentPrice else (tech?.currentPrice ?: 100.0)
+        val safeCurrent = if (currentPrice > 0) currentPrice else if (asset.rawPrice > 0) asset.rawPrice else (tech?.currentPrice ?: 100.0)
 
-        val ema9 = tech?.ema9 ?: (safeCurrent * 0.996)
+        val ema9 = tech?.ema9 ?: (safeCurrent * 0.9985)
         val bbLower = tech?.bollingerLower ?: (safeCurrent * 0.988)
         val dynamicSupport = tech?.supportLevel ?: (safeCurrent * 0.990)
         val bidRatio = tech?.orderBookDepth?.bidRatio ?: 0.65
@@ -786,23 +773,11 @@ object AiAdvisorEngine {
         // 3. HACİM İVMESİ (ANTİ-SPOOFING): Hacim ivmesi >= 1.05 ise gerçek para girişi onaylı
         val isVolumeConfirmed = volMomentum >= 1.05
 
-        // Sniper Price Algorithm:
+        // Gerçekçi 1. Kademe (Entry) Hesabı:
+        // 15 dakikalık pusu için anlık fiyattan sadece küçük bir geri çekilme (%0.15 mikro dip veya EMA9'a temas)
         val sniperPrice = when {
-            // Eğer yeşil dönüş mumu oluşmuş ve alıcı baskısı güçlüyse (%55+ alıcı) EMA9 veya güncel taban desteği pusu noktasıdır
-            (isLastCandleGreen || isLowerWickBounce) && bidRatio >= 0.55 && ema9 in (safeCurrent * 0.988)..(safeCurrent * 0.999) -> {
-                ema9
-            }
-            // VWAP altında aşırı satım varsa ve hacim ivmesi destekliyorsa dinamik taban
-            vwapDistancePct > 0.40 && dynamicSupport in (safeCurrent * 0.970)..(safeCurrent * 0.996) -> {
-                dynamicSupport
-            }
-            // Bollinger Alt Bandı
-            bbLower in (safeCurrent * 0.970)..(safeCurrent * 0.995) -> {
-                bbLower
-            }
-            else -> {
-                safeCurrent * 0.9940 // -0.60% mikro dip pusu
-            }
+            ema9 in (safeCurrent * 0.995)..(safeCurrent * 0.9995) -> ema9
+            else -> safeCurrent * 0.9985 // Anlık fiyatın %0.15 altı (ulaşılabilir gerçekçi pusu)
         }
 
         val dropPercent = (((safeCurrent - sniperPrice) / safeCurrent) * 100.0).coerceAtLeast(0.15)
@@ -855,7 +830,167 @@ object AiAdvisorEngine {
             options = listOf(singleSniperOption)
         )
     }
+
+    /**
+     * Taranan tüm coinleri (BTC, ETH, BNB, LINK, AVAX) anlık teknik metriklerle (VWAP, RSI, Alıcı Duvarı, Hacim)
+     * puanlayarak piyasadaki tekil 1 numaralı "En İyi Pusu Hedefi"ni (Master Target) seçer.
+     */
+    fun findMasterAmbushTarget(
+        assets: List<CryptoAsset>,
+        oracleMap: Map<String, BinanceOracleData>,
+        techMap: Map<String, TechnicalAnalysis5m>,
+        capitalProfile: CapitalProfileEntity? = null
+    ): MasterAmbushTarget? {
+        if (assets.isEmpty()) return null
+
+        val scoredTargets = assets.mapNotNull { asset ->
+            val oracle = oracleMap[asset.symbol]
+            val tech = techMap[asset.symbol]
+            val currentPrice = if (asset.rawPrice > 0) asset.rawPrice else (oracle?.binanceGlobalPrice ?: 0.0)
+            if (currentPrice <= 0.0) return@mapNotNull null
+
+            val vwap = if (asset.vwap > 0) asset.vwap else (tech?.vwap ?: currentPrice)
+            val rsi = tech?.rsi14 ?: 48.0
+            val bidRatio = tech?.orderBookDepth?.bidRatio ?: 0.52
+            val volMomentum = if (asset.volumeMomentum > 0) asset.volumeMomentum else (tech?.volumeMomentum ?: 1.0)
+            val ema9 = tech?.ema9 ?: (currentPrice * 0.9985)
+
+            var score = 0.0
+            val highlights = mutableListOf<String>()
+
+            // 1. VWAP İskontosu / Tabanı (Max 25 Puan)
+            if (vwap > 0) {
+                if (currentPrice < vwap) {
+                    val discount = ((vwap - currentPrice) / vwap) * 100.0
+                    val vwapPts = (15.0 + discount * 10.0).coerceIn(15.0, 25.0)
+                    score += vwapPts
+                    highlights.add("VWAP İskontosu (+%${String.format(Locale.US, "%.1f", discount)})")
+                } else if (currentPrice <= vwap * 1.006) {
+                    score += 18.0
+                    highlights.add("VWAP Tabanı Üzerinde")
+                } else {
+                    score += 8.0
+                }
+            }
+
+            // 2. RSI Değeri (Max 25 Puan)
+            when {
+                rsi in 28.0..45.0 -> {
+                    score += 25.0
+                    highlights.add("RSI İdeal Toparlanma (${String.format(Locale.US, "%.0f", rsi)})")
+                }
+                rsi < 28.0 -> {
+                    score += 23.0
+                    highlights.add("RSI Aşırı Satım (${String.format(Locale.US, "%.0f", rsi)})")
+                }
+                rsi in 45.0..58.0 -> {
+                    score += 16.0
+                    highlights.add("RSI Nötr Trend")
+                }
+                else -> {
+                    score += 6.0
+                }
+            }
+
+            // 3. Tahta Alıcı Derinliği (Max 25 Puan)
+            val bidPct = (bidRatio * 100.0).toInt()
+            when {
+                bidRatio >= 0.62 -> {
+                    score += 25.0
+                    highlights.add("Güçlü Alıcı Duvarı (%$bidPct)")
+                }
+                bidRatio >= 0.54 -> {
+                    score += 18.0
+                    highlights.add("Alıcı Üstünlüğü (%$bidPct)")
+                }
+                bidRatio >= 0.48 -> {
+                    score += 12.0
+                }
+                else -> {
+                    score += 5.0
+                }
+            }
+
+            // 4. Hacim İvmesi (Max 15 Puan)
+            when {
+                volMomentum >= 1.25 -> {
+                    score += 15.0
+                    highlights.add("Hacim Artışı (${String.format(Locale.US, "%.1f", volMomentum)}x)")
+                }
+                volMomentum >= 1.05 -> {
+                    score += 10.0
+                    highlights.add("Canlı Hacim (${String.format(Locale.US, "%.1f", volMomentum)}x)")
+                }
+                else -> {
+                    score += 5.0
+                }
+            }
+
+            // 5. Mum Aksiyonu (Max 10 Puan)
+            val lastCandle = asset.recentCandles.lastOrNull()
+            if (lastCandle != null && lastCandle.close >= lastCandle.open) {
+                score += 10.0
+                highlights.add("Yeşil Mum Teyidi")
+            } else {
+                score += 5.0
+            }
+
+            val finalScore = score.toInt().coerceIn(15, 99)
+
+            // Kesin Giriş & Çıkış & DCA Hesaplamaları
+            val entryPrice = when {
+                ema9 in (currentPrice * 0.995)..(currentPrice * 0.9995) -> ema9
+                else -> currentPrice * 0.9985 // Anlık fiyatın %0.15 altı
+            }
+            val targetExitPrice = entryPrice * 1.01 // Net %1.0 Kâr
+            val tier2Price = entryPrice * 0.99 // 2. Kademe = 1. Kademe * 0.99
+            val tier3Price = entryPrice * 0.98 // 3. Kademe = 1. Kademe * 0.98
+            val dropPercent = (((currentPrice - entryPrice) / currentPrice) * 100.0).coerceAtLeast(0.15)
+
+            val reason = buildString {
+                append("Tüm piyasa tarandı; ${asset.symbol} anlık olarak ")
+                if (currentPrice < vwap) append("VWAP altı dip bölgede ") else append("kurumsal ortalama üzerinde ")
+                append("ve %$bidPct alıcı derinliği ile şu anki en yüksek matematiksel potansiyele sahip.")
+            }
+
+            MasterAmbushTarget(
+                asset = asset,
+                opportunityScore = finalScore,
+                currentPrice = currentPrice,
+                entryPrice = entryPrice,
+                targetExitPrice = targetExitPrice,
+                tier2Price = tier2Price,
+                tier3Price = tier3Price,
+                dropPercent = dropPercent,
+                timeoutMinutes = 15,
+                buyerRatio = bidRatio,
+                rsi = rsi,
+                vwap = vwap,
+                aiReason = reason,
+                scoreHighlights = highlights
+            )
+        }
+
+        return scoredTargets.maxByOrNull { it.opportunityScore }
+    }
 }
+
+data class MasterAmbushTarget(
+    val asset: CryptoAsset,
+    val opportunityScore: Int,
+    val currentPrice: Double,
+    val entryPrice: Double,
+    val targetExitPrice: Double,
+    val tier2Price: Double,
+    val tier3Price: Double,
+    val dropPercent: Double,
+    val timeoutMinutes: Int,
+    val buyerRatio: Double,
+    val rsi: Double,
+    val vwap: Double,
+    val aiReason: String,
+    val scoreHighlights: List<String>
+)
 
 enum class SmartEntryType {
     FAST_TREND,
