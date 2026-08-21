@@ -165,6 +165,7 @@ fun CryptoAnalystMasterApp() {
 
     // Dialog state for detailed Asset Details Screen (Candlestick & Quant Analysis)
     var selectedAssetDetails by remember { mutableStateOf<CryptoAsset?>(null) }
+    val strategySheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
 
     // Dialog state for adding existing Midas holdings
     var showAddExistingHoldingDialog by remember { mutableStateOf(false) }
@@ -428,6 +429,11 @@ fun CryptoAnalystMasterApp() {
                     },
                     onOpenAssetDetails = { asset ->
                         selectedAssetDetails = asset
+                        coroutineScope.launch {
+                            try {
+                                strategySheetState.show()
+                            } catch (_: Exception) {}
+                        }
                     },
                     onOpenAddExistingDialog = {
                         showAddExistingHoldingDialog = true
@@ -587,6 +593,7 @@ fun CryptoAnalystMasterApp() {
 
                 ModalBottomSheet(
                     onDismissRequest = { selectedAssetDetails = null },
+                    sheetState = strategySheetState,
                     containerColor = ObsidianCard,
                     dragHandle = {
                         BottomSheetDefaults.DragHandle(color = IceCyanBright.copy(alpha = 0.6f))
@@ -3389,12 +3396,21 @@ fun LiveAssistantScreen(
                             )
                         }
                     }
-                    Text(
-                        text = "Strateji Odası için tıkla ➔",
-                        color = IceCyanBright,
-                        fontSize = 9.sp,
-                        fontWeight = FontWeight.Medium
-                    )
+
+                    assets.firstOrNull()?.let { firstAsset ->
+                        TextButton(
+                            onClick = { onOpenAssetDetails(firstAsset) },
+                            contentPadding = PaddingValues(horizontal = 6.dp, vertical = 2.dp),
+                            modifier = Modifier.height(28.dp)
+                        ) {
+                            Text(
+                                text = "Strateji Odası için tıkla ➔",
+                                color = IceCyanBright,
+                                fontSize = 10.sp,
+                                fontWeight = FontWeight.Bold
+                            )
+                        }
+                    }
                 }
 
                 LazyRow(
@@ -3417,9 +3433,8 @@ fun LiveAssistantScreen(
                         }
 
                         Surface(
-                            modifier = Modifier
-                                .width(128.dp)
-                                .clickable { onOpenAssetDetails(asset) },
+                            onClick = { onOpenAssetDetails(asset) },
+                            modifier = Modifier.width(128.dp),
                             color = ObsidianCard,
                             shape = RoundedCornerShape(12.dp),
                             border = BorderStroke(1.dp, if (isBullish) EmeraldProfit.copy(alpha = 0.5f) else CoralRed.copy(alpha = 0.4f))
@@ -3532,9 +3547,8 @@ fun LiveAssistantScreen(
             }
 
             Surface(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .clickable { onOpenAssetDetails(asset) },
+                onClick = { onOpenAssetDetails(asset) },
+                modifier = Modifier.fillMaxWidth(),
                 color = ObsidianSurface,
                 shape = RoundedCornerShape(14.dp),
                 border = BorderStroke(1.dp, ObsidianBorder)
